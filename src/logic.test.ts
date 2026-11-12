@@ -31,7 +31,7 @@ describe('jogo', () => {
     ev = advanceQuest(ev, Q, q('corrida'), '2026-11-11')
     ev = advanceQuest(ev, Q, q('corrida'), '2026-11-12')
     ev = advanceQuest(ev, Q, q('corrida'), '2026-11-13')
-    expect(totalXp(ev)).toBe(240)
+    expect(totalXp(ev)).toBe(180)
     expect(questCount(ev, q('corrida'), '2026-11-16')).toBe(0)
   })
   it('bônus diário entra e sai ao desfazer', () => {
@@ -111,5 +111,95 @@ describe('categorias', () => {
     const txs = [t('a', -100, 'mercado'), t('b', -50, 'mercado', 1), t('c', 20, 'mercado'), t('d', -900, 'transferencias'), t('e', 5000, 'receita'), t('f', -70, 'lazer', 0, '2026-10-30')]
     expect(summarize(txs, DEFAULT_CATEGORIES, '2026-11', null)).toEqual({ spent: 130, income: 5000, byCategory: { mercado: 130 } })
     expect(summarize(txs, DEFAULT_CATEGORIES, '2026-11', 1).spent).toBe(50)
+  })
+})
+
+import { parseAccountPdf, parseCardPdf, type PdfLine } from './finance/pdf'
+import { assess, composition, strengthPlan, targets, type HealthProfile } from './health'
+
+/** monta uma linha como o pdf.js entrega: trechos com posição; números alinhados à direita na coluna */
+const L = (...cells: [string, number][]): PdfLine => ({
+  text: cells.map((c) => c[0]).join(' '),
+  items: cells.map(([str, right]) => ({ str, w: str.length * 5, x: right - str.length * 5 })),
+})
+
+describe('PDF', () => {
+  it('extrato de conta: sinal pela coluna, data herdada e histórico em duas linhas', () => {
+    const lines = [
+      L(['Data', 60], ['Histórico', 200], ['Docto.', 300], ['Crédito (R$)', 400], ['Débito (R$)', 480], ['Saldo (R$)', 560]),
+      L(['01/10/2026', 60], ['SALDO ANTERIOR', 200], ['1.000,00', 560]),
+      L(['02/10/2026', 60], ['TRANSFERENCIA PIX', 200], ['1234567', 300], ['150,00', 480], ['850,00', 560]),
+      L(['DES: MARIA SILVA 02/10', 200]),
+      L(['PAGTO ELETRON COBRANCA', 200], ['7654321', 300], ['200,00', 480]),
+      L(['05/10/2026', 60], ['CREDITO DE SALARIO', 200], ['55', 300], ['9.500,00', 400], ['10.150,00', 560]),
+      L(['Total', 60], ['9.500,00', 400], ['350,00', 480], ['10.150,00', 560]),
+    ]
+    expect(parseAccountPdf(lines).map(({ ref: _r, ...t }) => t)).toEqual([
+      { date: '2026-10-02', description: 'TRANSFERENCIA PIX DES: MARIA SILVA 02/10', amount: -150 },
+      { date: '2026-10-02', description: 'PAGTO ELETRON COBRANCA', amount: -200 },
+      { date: '2026-10-05', description: 'CREDITO DE SALARIO', amount: 9500 },
+    ])
+  })
+  it('extrato de conta sem cabeçalho posicionado: sinal pela variação do saldo', () => {
+    const one = (text: string): PdfLine => ({ text, items: [{ str: text, x: 0, w: 500 }] })
+    const tx = parseAccountPdf([one('01/10/2026 SALDO ANTERIOR 1.000,00'), one('02/10/2026 COMPRA DEBITO 150,00 850,00'), one('03/10/2026 DEPOSITO 300,00 1.150,00')])
+    expect(tx.map((t) => t.amount)).toEqual([-150, 300])
+  })
+  it('fatura de cartão: ano pelo vencimento, crédito com sinal, parcela antiga vai para o mês da fatura', () => {
+    const one = (text: string): PdfLine => ({ text, items: [{ str: text, x: 0, w: 500 }] })
+    const tx = parseCardPdf(
+      [
+        one('Vencimento 10/01/2026 Total da fatura 1.234,56'),
+        one('Data Histórico de Lançamentos Valor'),
+        one('20/12 SUPERMERCADO EXTRA SAO PAULO 350,00'),
+        one('02/01 UBER *TRIP SAO PAULO 23,50'),
+        one('15/08 LOJA XPTO 05/10 CAMPINAS 199,00'),
+        one('28/12 PAGTO. POR DEB EM C/C 1.500,00-'),
+        one('Total para 10/01 2.072,50'),
+      ],
+      '2026-01-05',
+    )
+    expect(tx.map(({ ref: _r, ...t }) => t)).toEqual([
+      { date: '2025-12-20', description: 'SUPERMERCADO EXTRA SAO PAULO', amount: -350 },
+      { date: '2026-01-02', description: 'UBER *TRIP SAO PAULO', amount: -23.5 },
+      { date: '2025-12-01', description: 'LOJA XPTO 05/10 CAMPINAS', amount: -199 },
+      { date: '2025-12-28', description: 'PAGTO. POR DEB EM C/C', amount: 1500 },
+    ])
+  })
+})
+
+describe('saúde', () => {
+  const p: HealthProfile = { sex: 'm', birthYear: 1990, heightCm: 178, goal: 'emagrecer', runDays: 3, strengthDays: 2 }
+  it('composição corporal', () => {
+    const c = composition(p, { date: '2026-11-01', weightKg: 80, waistCm: 88, neckCm: 38 })
+    expect(c.bmi).toBe(25.2)
+    expect(c.source).toBe('estimado')
+    expect(c.bodyFatPct).toBeGreaterThan(15)
+    expect(c.bodyFatPct).toBeLessThan(22)
+    expect(c.leanKg! + c.fatKg!).toBeCloseTo(80, 0)
+    expect(composition(p, { date: 'x', weightKg: 80, bodyFatPct: 15 })).toMatchObject({ source: 'medido', fatKg: 12, leanKg: 68, category: 'Em forma' })
+    expect(composition(p, { date: 'x', weightKg: 80 }).bodyFatPct).toBeNull()
+  })
+  it('metas de alimentação', () => {
+    const t = targets(p, { date: 'x', weightKg: 80 }, 2026)
+    // Mifflin: 800 + 1112.5 - 180 + 5 = 1737.5; x1.6 = 2780; x0.82 = 2280
+    expect(t).toMatchObject({ bmr: 1738, tdee: 2780, kcal: 2280, proteinG: 160, fatG: 65 })
+    expect(t.proteinG * 4 + t.fatG * 9 + t.carbsG * 4).toBeGreaterThan(t.kcal - 40)
+    expect(t.proteinG * 4 + t.fatG * 9 + t.carbsG * 4).toBeLessThan(t.kcal + 40)
+    expect(targets({ ...p, goal: 'hipertrofia' }, { date: 'x', weightKg: 80 }, 2026).kcal).toBeGreaterThan(t.tdee)
+  })
+  it('avaliação da evolução', () => {
+    expect(assess(p, [{ date: '2026-10-01', weightKg: 82 }])).toEqual([])
+    const ok = assess(p, [{ date: '2026-10-01', weightKg: 82 }, { date: '2026-10-29', weightKg: 80 }])
+    expect(ok[0].ok).toBe(true)
+    const fast = assess(p, [{ date: '2026-10-01', weightKg: 82 }, { date: '2026-10-15', weightKg: 79 }])
+    expect(fast[0].ok).toBe(false)
+    const lean = assess(p, [{ date: '2026-10-01', weightKg: 82, bodyFatPct: 20 }, { date: '2026-10-29', weightKg: 80, bodyFatPct: 21 }])
+    expect(lean[1]).toMatchObject({ ok: false })
+  })
+  it('plano de musculação segue os dias escolhidos', () => {
+    expect(strengthPlan('performance', 0)).toBeNull()
+    expect(strengthPlan('performance', 2)!.workouts).toHaveLength(2)
+    expect(strengthPlan('hipertrofia', 3)!.workouts).toHaveLength(3)
   })
 })

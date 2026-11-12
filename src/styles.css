@@ -40,7 +40,7 @@ p { margin: 0; }
 }
 .tabs button {
   flex: 1; max-width: 180px; padding: 16px 4px; background: none; border: 0;
-  color: var(--muted); font: inherit; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+  color: var(--muted); font: inherit; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer;
   border-top: 2px solid transparent; margin-top: -1px;
 }
 .tabs button.on { color: var(--text); border-top-color: var(--accent); }
@@ -136,3 +136,18 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; 
 .tiles.money .tile:first-child { border-top: 0; }
 .tiles.money .tile b { font-size: 17px; }
 .tiles.money .tile span { font-size: 14px; color: var(--text-2); }
+.kv { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.kv:first-child { border-top: 0; }
+.kv b { font-variant-numeric: tabular-nums; text-align: right; }
+.finding { display: flex; gap: 8px; padding: 8px 0; font-size: 14px; }
+.finding .ic { flex: none; font-weight: 700; }
+.finding.ok .ic { color: var(--good); }
+.finding.bad .ic { color: var(--warn); }
+.macros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+.macros div { text-align: center; background: var(--bg); border-radius: 10px; padding: 10px 4px; }
+.macros b { display: block; font-size: 18px; }
+.macros span { font-size: 12px; color: var(--muted); }
+.workout h3 { margin: 0; font-size: 15px; }
+.ex { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.ex b { white-space: nowrap; font-weight: 600; color: var(--text-2); }
+ul.tips { margin: 8px 0 0; padding-left: 18px; color: var(--text-2); font-size: 13px; }

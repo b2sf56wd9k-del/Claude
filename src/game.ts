@@ -204,7 +204,7 @@ export function awardOnce(events: XpEvent[], ev: XpEvent): XpEvent[] {
 }
 
 export const DEFAULT_QUESTS: Quest[] = [
-  { id: 'corrida', title: 'Treino de corrida da assessoria', attr: 'resistencia', xp: 240, freq: 'weekly', target: 4, active: true },
+  { id: 'corrida', title: 'Treino de corrida da assessoria', attr: 'resistencia', xp: 180, freq: 'weekly', target: 3, active: true },
   { id: 'forca', title: 'Treino de força', attr: 'forca', xp: 140, freq: 'weekly', target: 2, active: true },
   { id: 'financas', title: 'Revisar gastos da semana', attr: 'financas', xp: 60, freq: 'weekly', target: 1, active: true },
   { id: 'sono', title: 'Dormir 7h ou mais', attr: 'disciplina', xp: 20, freq: 'daily', target: 1, active: true },

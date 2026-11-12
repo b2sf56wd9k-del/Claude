@@ -47,7 +47,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
 const R = (categoryId: string, ...patterns: string[]): Rule[] => patterns.map((pattern) => ({ pattern, categoryId }))
 
 export const DEFAULT_RULES: Rule[] = [
-  ...R('transferencias', 'pagamento de fatura', 'pagamento fatura', 'pagamento recebido', 'pgto fatura', 'fatura cartao'),
+  ...R('transferencias', 'pagamento de fatura', 'pagamento fatura', 'pagamento recebido', 'pgto fatura', 'fatura cartao', 'pagto', 'cartao visa', 'gasto c credito'),
   ...R('investimentos', 'aplicacao', 'resgate', 'tesouro direto', 'corretora', 'cdb', 'rdb'),
   ...R('restaurantes', 'ifood', 'rappi', 'restaurante', 'lanchonete', 'pizzaria', 'burger', 'padaria', 'cafeteria', 'bar '),
   ...R('mercado', 'supermercado', 'mercado', 'atacadao', 'assai', 'carrefour', 'pao de acucar', 'hortifruti', 'sacolao'),

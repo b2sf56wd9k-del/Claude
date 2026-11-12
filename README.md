@@ -14,14 +14,17 @@ npm run build    # gera a pasta dist/ (site estático, instalável no celular co
 ## Como funciona
 
 - **Missões**: cada conclusão gera um evento de XP. Concluir todas as diárias dá bônus e mantém a sequência; falhar gera uma missão de penalidade no dia seguinte, que salva a sequência se cumprida.
-- **Gastos**: importe OFX ou CSV (conta ou cartão, de qualquer uma das duas pessoas). Os lançamentos são classificados por regras; ao corrigir uma categoria, o app aprende o estabelecimento. Pagamento de fatura e transferências não entram no total, para não contar o cartão em dobro.
+- **Saúde**: composição corporal (IMC, % de gordura medido ou estimado por circunferências, massa magra), metas diárias de calorias e macros conforme o objetivo, avaliação da evolução e plano de musculação para 2 ou 3 dias por semana. São estimativas por fórmulas, não prescrição.
+- **Gastos**: importe PDF, OFX ou CSV (conta ou cartão, de qualquer uma das duas pessoas). Os lançamentos são classificados por regras; ao corrigir uma categoria, o app aprende o estabelecimento. Pagamento de fatura e transferências não entram no total, para não contar o cartão em dobro.
 - **Finanças no jogo**: importar o extrato de um mês e fechar o mês dentro do orçamento rendem XP.
 - **Dados**: ficam no navegador do aparelho (localStorage). Use Ajustes → Exportar backup.
 
 ## Estrutura
 
 - `src/game.ts` — regras do jogo (funções puras)
+- `src/health.ts` — composição corporal, metas de alimentação e planos de força
 - `src/finance/parse.ts` — leitura de OFX/CSV
+- `src/finance/pdf.ts` — leitura de extrato e fatura em PDF
 - `src/finance/categorize.ts` — categorias, regras e resumos mensais
 - `src/store.ts` — estado persistido
 - `src/pages/` — telas

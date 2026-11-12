@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
 import { toISO } from '../game'
 import { brl, monthLabel, monthOf, shiftMonth, summarize } from '../finance/categorize'
-import { decodeBytes, type Source } from '../finance/parse'
+import { decodeBytes, parseStatement, type ParsedTx, type Source } from '../finance/parse'
+import { extractPdfLines, parsePdfLines } from '../finance/pdf'
 import { BUDGET_XP, IMPORT_XP, useStore } from '../store'
 
 export default function Finance() {
-  const { txs, categories, people, events, importStatement, setTxCategory, setBudget, addCategory, closeMonth } = useStore()
+  const { txs, categories, people, events, importParsed, setTxCategory, setBudget, addCategory, closeMonth } = useStore()
   const thisMonth = monthOf(toISO(new Date()))
   const [month, setMonth] = useState(() => txs.reduce((m, t) => (monthOf(t.date) > m ? monthOf(t.date) : m), '') || thisMonth)
   const [owner, setOwner] = useState<number | null>(null)
@@ -147,7 +148,7 @@ export default function Finance() {
       </div>
 
       <h2>Importar extrato</h2>
-      <Importer people={people} onImport={importStatement} onDone={(m) => m && setMonth(m)} />
+      <Importer people={people} onImport={importParsed} onDone={(m) => m && setMonth(m)} />
 
       <h2>Lançamentos · {monthTxs.length}</h2>
       <div className="card">
@@ -208,7 +209,7 @@ function NewCategory({ onAdd }: { onAdd: (name: string) => void }) {
 
 function Importer(p: {
   people: [string, string]
-  onImport: (fileName: string, text: string, source: Source, owner: number) => { added: number; skipped: number }
+  onImport: (parsed: ParsedTx[], source: Source, owner: number) => { added: number; skipped: number }
   onDone: (month: string | null) => void
 }) {
   const [source, setSource] = useState<Source>('cartao')
@@ -222,14 +223,21 @@ function Importer(p: {
     const before = useStore.getState().txs.length
     for (const f of Array.from(files)) {
       try {
-        const r = p.onImport(f.name, decodeBytes(await f.arrayBuffer()), source, owner)
+        const buf = await f.arrayBuffer()
+        const isPdf = /\.pdf$/i.test(f.name)
+        const parsed = isPdf
+          ? parsePdfLines(await extractPdfLines(buf, () => prompt(`"${f.name}" é protegido por senha. Digite a senha do PDF:`)), source, toISO(new Date()))
+          : parseStatement(f.name, decodeBytes(buf), source)
+        const r = p.onImport(parsed, source, owner)
+        const out = parsed.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0)
+        const inn = parsed.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0)
         lines.push(
-          r.added + r.skipped === 0
+          parsed.length === 0
             ? `${f.name}: nenhum lançamento reconhecido.`
-            : `${f.name}: ${r.added} novo(s)${r.skipped ? `, ${r.skipped} já importado(s)` : ''}.`,
+            : `${f.name}: ${r.added} novo(s)${r.skipped ? `, ${r.skipped} já importado(s)` : ''}. No arquivo: saídas ${brl(out)}, entradas ${brl(inn)}${isPdf ? ' — confira com o total do PDF.' : '.'}`,
         )
       } catch (e) {
-        lines.push(`${f.name}: ${e instanceof Error ? e.message : 'não consegui ler o arquivo.'}`)
+        lines.push(`${f.name}: não consegui ler o arquivo${e instanceof Error && e.message ? ` (${e.message})` : ''}.`)
       }
     }
     const fresh = useStore.getState().txs.slice(before)
@@ -259,9 +267,9 @@ function Importer(p: {
           </select>
         </label>
       </div>
-      <input ref={input} type="file" accept=".ofx,.qfx,.csv,.txt" multiple hidden onChange={(e) => handle(e.target.files)} />
+      <input ref={input} type="file" accept=".pdf,.ofx,.qfx,.csv,.txt" multiple hidden onChange={(e) => handle(e.target.files)} />
       <button className="btn" style={{ marginTop: 12 }} onClick={() => input.current?.click()}>
-        Escolher arquivos (OFX ou CSV)
+        Escolher arquivos (PDF, OFX ou CSV)
       </button>
       <p className="notice">
         {msg || `Cada mês novo importado vale +${IMPORT_XP} XP em Finanças. Reimportar o mesmo arquivo não duplica lançamentos.`}

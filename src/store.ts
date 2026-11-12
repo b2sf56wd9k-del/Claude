@@ -7,6 +7,7 @@ import {
   completePenalty,
   toISO,
   undoQuest,
+  weekStart,
   type Quest,
   type XpEvent,
 } from './game'
@@ -22,10 +23,12 @@ import {
   type Rule,
   type Tx,
 } from './finance/categorize'
-import { parseStatement, type Source } from './finance/parse'
+import type { ParsedTx, Source } from './finance/parse'
+import { DEFAULT_PROFILE, targets, type HealthProfile, type Measurement } from './health'
 
 export const IMPORT_XP = 40
 export const BUDGET_XP = 25
+export const MEASURE_XP = 30
 
 export interface Data {
   name: string
@@ -37,6 +40,10 @@ export interface Data {
   categories: Category[]
   /** regras aprendidas com as correções do usuário */
   rules: Rule[]
+  health: HealthProfile
+  /** false até o usuário salvar o perfil de saúde pela primeira vez */
+  healthReady: boolean
+  measurements: Measurement[]
 }
 
 interface Actions {
@@ -45,7 +52,10 @@ interface Actions {
   payPenalty: () => void
   saveQuest: (q: Quest) => void
   removeQuest: (id: string) => void
-  importStatement: (fileName: string, text: string, source: Source, owner: number) => { added: number; skipped: number }
+  importParsed: (parsed: ParsedTx[], source: Source, owner: number) => { added: number; skipped: number }
+  saveHealth: (p: HealthProfile) => void
+  addMeasurement: (m: Measurement) => void
+  removeMeasurement: (date: string) => void
   setTxCategory: (txId: string, categoryId: string) => void
   removeMonth: (month: string, source: Source, owner: number) => void
   setBudget: (categoryId: string, budget: number) => void
@@ -67,7 +77,32 @@ const initial = (): Data => ({
   txs: [],
   categories: DEFAULT_CATEGORIES,
   rules: [],
+  health: DEFAULT_PROFILE,
+  healthReady: false,
+  measurements: [],
 })
+
+export const latestMeasurement = (list: Measurement[]) =>
+  list.length ? list.reduce((a, b) => (b.date > a.date ? b : a)) : null
+
+/** Mantém as missões de corrida, força e proteína alinhadas ao perfil de saúde. */
+function syncHealthQuests(quests: Quest[], health: HealthProfile, measurements: Measurement[]): Quest[] {
+  const upsert = (list: Quest[], q: Quest) => (list.some((x) => x.id === q.id) ? list.map((x) => (x.id === q.id ? { ...x, ...q } : x)) : [...list, q])
+  let out = quests
+  if (health.runDays > 0) {
+    out = upsert(out, { id: 'corrida', title: 'Treino de corrida da assessoria', attr: 'resistencia', xp: 60 * health.runDays, freq: 'weekly', target: health.runDays, active: true })
+  }
+  out =
+    health.strengthDays > 0
+      ? upsert(out, { id: 'forca', title: 'Treino de força', attr: 'forca', xp: 70 * health.strengthDays, freq: 'weekly', target: health.strengthDays, active: true })
+      : out.map((q) => (q.id === 'forca' ? { ...q, active: false } : q))
+  const m = latestMeasurement(measurements)
+  if (m) {
+    const t = targets(health, m, new Date().getFullYear())
+    out = upsert(out, { id: 'proteina', title: `Bater a meta de proteína (${t.proteinG} g)`, attr: 'forca', xp: 20, freq: 'daily', target: 1, active: true })
+  }
+  return out
+}
 
 export const allRules = (d: Pick<Data, 'rules'>) => [...d.rules, ...DEFAULT_RULES]
 
@@ -97,9 +132,8 @@ export const useStore = create<Data & Actions>()(
 
       removeQuest: (id) => set((s) => ({ quests: s.quests.filter((q) => q.id !== id) })),
 
-      importStatement: (fileName, text, source, owner) => {
+      importParsed: (parsed, source, owner) => {
         const s = get()
-        const parsed = parseStatement(fileName, text, source)
         const have = new Set(s.txs.map((t) => t.id))
         const rules = allRules(s)
         const fresh: Tx[] = []
@@ -183,6 +217,27 @@ export const useStore = create<Data & Actions>()(
         return won
       },
 
+      saveHealth: (health) =>
+        set((s) => ({ health, healthReady: true, quests: syncHealthQuests(s.quests, health, s.measurements) })),
+
+      addMeasurement: (m) =>
+        set((s) => {
+          const measurements = [...s.measurements.filter((x) => x.date !== m.date), m].sort((a, b) => (a.date < b.date ? -1 : 1))
+          return {
+            measurements,
+            quests: s.healthReady ? syncHealthQuests(s.quests, s.health, measurements) : s.quests,
+            events: awardOnce(s.events, {
+              key: `measure:${weekStart(m.date)}`,
+              date: today(),
+              attr: 'disciplina',
+              xp: MEASURE_XP,
+              label: 'Avaliação corporal da semana',
+            }),
+          }
+        }),
+
+      removeMeasurement: (date) => set((s) => ({ measurements: s.measurements.filter((m) => m.date !== date) })),
+
       setProfile: (p) => set(p),
       replaceAll: (d) => set(d),
       reset: () => set(initial()),
@@ -192,6 +247,6 @@ export const useStore = create<Data & Actions>()(
 )
 
 export function snapshot(): Data {
-  const { name, startDate, people, quests, events, txs, categories, rules } = useStore.getState()
-  return { name, startDate, people, quests, events, txs, categories, rules }
+  const { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements } = useStore.getState()
+  return { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements }
 }
