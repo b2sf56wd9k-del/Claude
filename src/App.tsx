@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { initCloud } from './cloud'
+import { initArtifactCloud, initCloud, useCloud } from './cloud'
+import { DialogHost } from './dialog'
+import { inArtifact } from './platform'
 import { finishStravaLogin, syncStrava, useStore } from './store'
 import Status from './pages/Status'
 import Quests from './pages/Quests'
@@ -15,7 +17,8 @@ const TABS = [
   { id: 'settings', label: 'Ajustes', el: <Settings /> },
 ]
 
-initCloud()
+if (inArtifact) void initArtifactCloud()
+else initCloud()
 
 /** Volta do login do Strava (?code=...) e leitura automática dos treinos, no máximo a cada 15 minutos. */
 async function stravaStartup(): Promise<string | null> {
@@ -33,7 +36,7 @@ async function stravaStartup(): Promise<string | null> {
     }
   }
   const st = useStore.getState().strava
-  if (st?.refreshToken && (!st.lastSync || Date.now() - Date.parse(st.lastSync) > 15 * 60000)) {
+  if ((st?.refreshToken || st?.connector) && (!st.lastSync || Date.now() - Date.parse(st.lastSync) > 15 * 60000)) {
     try {
       const n = await syncStrava()
       if (n) msg = `${msg ? msg + ' ' : ''}${n} treino(s) do Strava contabilizado(s).`
@@ -49,6 +52,7 @@ let started = false
 export default function App() {
   const [tab, setTab] = useState('status')
   const [toast, setToast] = useState<string | null>(null)
+  const loading = useCloud((c) => c.mode === 'artifact' && !c.ready)
   useEffect(() => {
     const run = () => void stravaStartup().then((m) => m && setToast(m))
     if (!started) {
@@ -62,6 +66,7 @@ export default function App() {
   return (
     <div className="app">
       <main>
+        {loading && <p className="toast">Carregando seus dados salvos…</p>}
         {toast && (
           <button className="toast" onClick={() => setToast(null)}>
             {toast} ✕
@@ -69,6 +74,7 @@ export default function App() {
         )}
         {TABS.find((t) => t.id === tab)!.el}
       </main>
+      <DialogHost />
       <nav className="tabs">
         {TABS.map((t) => (
           <button key={t.id} className={t.id === tab ? 'on' : ''} onClick={() => setTab(t.id)}>

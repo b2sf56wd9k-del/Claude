@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { confirmDialog } from '../dialog'
 import { questCount, toISO } from '../game'
 import { GOALS, PURPOSES, assess, composition, strengthPlan, targets, weekLayout, type Goal, type HealthProfile, type Measurement, type Sex } from '../health'
 import { MEASURE_XP, latestMeasurement, useStore } from '../store'
@@ -110,7 +111,7 @@ export default function Health() {
                     {fmt(m.weightKg, ' kg')}
                     {c.bodyFatPct != null ? ` · ${fmt(c.bodyFatPct, '%')}` : ''}
                   </b>
-                  <button className="btn ghost sm" aria-label={`Excluir medição de ${m.date}`} onClick={() => confirm('Excluir esta medição?') && removeMeasurement(m.date)}>
+                  <button className="btn ghost sm" aria-label={`Excluir medição de ${m.date}`} onClick={async () => (await confirmDialog('Excluir esta medição?', 'Excluir', true)) && removeMeasurement(m.date)}>
                     ×
                   </button>
                 </span>

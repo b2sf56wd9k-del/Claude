@@ -2,6 +2,7 @@
 // Dois documentos: "personal" (jogo, saúde, Strava — só do dono) e "finance" (gastos — dono + convidados).
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { create } from 'zustand'
+import { use } from './platform'
 import { useStore, type Data } from './store'
 
 const CFG_KEY = 'ascensao-cloud'
@@ -57,6 +58,14 @@ interface Meta {
 }
 
 interface CloudState {
+  /** onde os dados ficam: projeto Supabase ou banco do próprio artefato */
+  mode: 'supabase' | 'artifact'
+  /** primeira sincronização concluída (ou falhou) */
+  ready: boolean
+  /** dados pessoais sincronizam (falso para convidados sem identidade no artefato) */
+  personal: boolean
+  /** pode gravar os gastos compartilhados */
+  canWrite: boolean
   configured: boolean
   email: string | null
   status: 'off' | 'idle' | 'syncing' | 'error'
@@ -68,10 +77,25 @@ interface CloudState {
 }
 
 export const useCloud = create<CloudState>(() => ({
+  mode: 'supabase', ready: false, personal: true, canWrite: true,
   configured: false, email: null, status: 'off', error: null, lastSync: null, financeOwner: true, members: [],
 }))
 
 let client: SupabaseClient | null = null
+
+interface Remote {
+  data: Partial<Personal & Finance>
+  stamp: string
+}
+/** Onde os documentos ficam guardados. */
+interface Backend {
+  /** resolve o que for preciso antes de sincronizar */
+  prepare(): Promise<void>
+  enabled(kind: Kind): boolean
+  load(kind: Kind): Promise<Remote | null>
+  save(kind: Kind, data: Personal | Finance, stamp: string, exists: boolean): Promise<void>
+}
+let backend: Backend | null = null
 let uid: string | null = null
 let financeId: string | null = null
 let applying = false
@@ -124,15 +148,12 @@ async function onSession(userId: string | null, email: string | null) {
   if (!userId) {
     meta = { seen: {}, dirty: { personal: false, finance: false } }
     saveMeta()
+    backend = null
     useCloud.setState({ email: null, status: 'idle', error: null, members: [], financeOwner: true })
     return
   }
-  // Primeiro acesso neste aparelho: o que já existe aqui precisa ser preservado e enviado.
-  if (!meta.seen.personal && !meta.seen.finance) {
-    const s = useStore.getState()
-    meta.dirty = { personal: s.events.length > 0 || s.measurements.length > 0 || s.healthReady, finance: s.txs.length > 0 }
-    saveMeta()
-  }
+  backend = supabaseBackend
+  markFirstAccess()
   useCloud.setState({ email })
   await sync()
 }
@@ -151,8 +172,7 @@ export function initCloud() {
     // fora do callback, como a biblioteca recomenda, para não travar outras chamadas de autenticação
     setTimeout(() => void onSession(session?.user.id ?? null, session?.user.email ?? null), 0)
   })
-  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && schedule(500))
-  setInterval(() => document.visibilityState === 'visible' && void sync(), 60000)
+  keepInSync()
 }
 
 export function configure(url: string, anonKey: string) {
@@ -207,13 +227,96 @@ function apply(patch: Partial<Data>) {
   }
 }
 
-async function syncDoc(kind: Kind, id: string) {
-  const db = client!
-  const slice = () => (kind === 'personal' ? personalOf(useStore.getState()) : financeOf(useStore.getState()))
-  const { data: remote, error } = await db.from('docs').select('data, updated_at, owner, members').eq('id', id).maybeSingle()
-  if (error) throw new Error(error.message)
+const supabaseBackend: Backend = {
+  async prepare() {
+    if (financeId) return
+    // Se alguém compartilhou os gastos comigo, uso o documento dessa pessoa; senão, o meu.
+    const { data, error } = await client!.from('docs').select('id, owner').like('id', 'finance:%')
+    if (error) throw new Error(error.message)
+    financeId = data?.find((d) => d.owner !== uid)?.id ?? `finance:${uid}`
+  },
+  enabled: () => true,
+  async load(kind) {
+    const id = kind === 'personal' ? `personal:${uid}` : financeId!
+    const { data: remote, error } = await client!.from('docs').select('data, updated_at, owner, members').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!remote) return null
+    if (kind === 'finance') useCloud.setState({ financeOwner: remote.owner === uid, members: remote.members ?? [] })
+    return { data: remote.data, stamp: remote.updated_at }
+  },
+  async save(kind, data, stamp, exists) {
+    const id = kind === 'personal' ? `personal:${uid}` : financeId!
+    const res = exists
+      ? await client!.from('docs').update({ data, updated_at: stamp }).eq('id', id)
+      : await client!.from('docs').insert({ id, data, updated_at: stamp })
+    if (res.error) throw new Error(res.error.message)
+  },
+}
 
-  if (remote && remote.updated_at !== meta.seen[kind]) {
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Banco do artefato. Cada parte vira um documento-base mais um documento por mês
+ * (eventos de XP ou lançamentos), para nenhum passar do limite de tamanho.
+ *   data/users/<id>/base, data/users/<id>/ev-AAAA-MM   pessoal, privado de cada pessoa
+ *   finance/config, finance/tx-AAAA-MM                 gastos, compartilhados
+ */
+function artifactBackend(db: any, myId: string | null, canWrite: boolean): Backend {
+  const written = new Map<string, string>()
+  const spec = {
+    personal: { col: () => `data/users/${myId}`, base: 'base', prefix: 'ev-', list: 'events' },
+    finance: { col: () => 'finance', base: 'config', prefix: 'tx-', list: 'txs' },
+  } as const
+  const put = async (path: string, body: unknown) => {
+    const json = JSON.stringify(body)
+    if (written.get(path) === json) return
+    await db.doc(path).set(JSON.parse(json))
+    written.set(path, json)
+  }
+  return {
+    async prepare() {},
+    enabled: (kind) => (kind === 'personal' ? !!myId : canWrite),
+    async load(kind) {
+      const sp = spec[kind]
+      const snap = await db.collection(sp.col()).limit(1000).get()
+      let base: any = null
+      const items: any[] = []
+      for (const d of [...snap.docs].sort((a: any, b: any) => (a.id < b.id ? -1 : 1))) {
+        const body = JSON.parse(JSON.stringify(d.data() ?? {}))
+        written.set(`${sp.col()}/${d.id}`, JSON.stringify(body))
+        if (d.id === sp.base) base = body
+        else if (d.id.startsWith(sp.prefix)) items.push(...(body[sp.list] ?? []))
+      }
+      if (!base) return null
+      const { stamp, ...rest } = base
+      return { data: { ...rest, [sp.list]: items }, stamp }
+    },
+    async save(kind, data, stamp) {
+      const sp = spec[kind]
+      const { [sp.list]: list, ...rest } = data as any
+      const months = new Map<string, any[]>()
+      for (const it of list as any[]) {
+        const m = String(it.date).slice(0, 7)
+        months.set(m, [...(months.get(m) ?? []), it])
+      }
+      // meses que existiam e ficaram vazios também precisam ser regravados
+      for (const path of written.keys()) {
+        const id = path.slice(sp.col().length + 1)
+        if (path.startsWith(sp.col() + '/') && id.startsWith(sp.prefix) && !months.has(id.slice(sp.prefix.length))) months.set(id.slice(sp.prefix.length), [])
+      }
+      for (const [m, arr] of months) await put(`${sp.col()}/${sp.prefix}${m}`, { [sp.list]: arr })
+      await put(`${sp.col()}/${sp.base}`, { ...rest, stamp })
+    },
+  }
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+async function syncDoc(kind: Kind) {
+  const be = backend!
+  if (!be.enabled(kind)) return
+  const slice = () => (kind === 'personal' ? personalOf(useStore.getState()) : financeOf(useStore.getState()))
+  const remote = await be.load(kind)
+
+  if (remote && remote.stamp !== meta.seen[kind]) {
     // A nuvem mudou desde a última vez: sem pendências locais ela substitui; com pendências, junta.
     const next = !meta.dirty[kind]
       ? remote.data
@@ -221,29 +324,27 @@ async function syncDoc(kind: Kind, id: string) {
         ? mergePersonal(slice() as Personal, remote.data)
         : mergeFinance(slice() as Finance, remote.data)
     apply(next)
-    meta.seen[kind] = remote.updated_at
+    meta.seen[kind] = remote.stamp
     saveMeta()
   }
-  if (kind === 'finance' && remote) useCloud.setState({ financeOwner: remote.owner === uid, members: remote.members ?? [] })
 
   if (meta.dirty[kind] || !remote) {
-    const updated_at = new Date().toISOString()
+    const stamp = new Date().toISOString()
     meta.dirty[kind] = false
-    const res = remote
-      ? await db.from('docs').update({ data: slice(), updated_at }).eq('id', id)
-      : await db.from('docs').insert({ id, data: slice(), updated_at })
-    if (res.error) {
+    try {
+      await be.save(kind, slice(), stamp, !!remote)
+    } catch (e) {
       meta.dirty[kind] = true
       saveMeta()
-      throw new Error(res.error.message)
+      throw e
     }
-    meta.seen[kind] = updated_at
+    meta.seen[kind] = stamp
     saveMeta()
   }
 }
 
 export async function sync() {
-  if (!client || !uid) return
+  if (!backend || !uid) return
   if (running) {
     again = true
     return
@@ -251,20 +352,14 @@ export async function sync() {
   running = true
   useCloud.setState({ status: 'syncing' })
   try {
-    if (!financeId) {
-      // Se alguém compartilhou os gastos comigo, uso o documento dessa pessoa; senão, o meu.
-      const { data, error } = await client.from('docs').select('id, owner').like('id', 'finance:%')
-      if (error) throw new Error(error.message)
-      const shared = data?.find((d) => d.owner !== uid)
-      financeId = shared?.id ?? `finance:${uid}`
-    }
-    const fid = financeId ?? `finance:${uid}`
-    await syncDoc('personal', `personal:${uid}`)
-    await syncDoc('finance', fid)
-    useCloud.setState({ status: 'idle', error: null, lastSync: new Date().toISOString() })
+    await backend.prepare()
+    await syncDoc('personal')
+    await syncDoc('finance')
+    useCloud.setState({ status: 'idle', error: null, lastSync: new Date().toISOString(), ready: true })
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e)
     useCloud.setState({
+      ready: true,
       status: 'error',
       error: /relation .*docs.* does not exist|schema cache/i.test(msg) ? 'A tabela ainda não existe: rode o arquivo supabase/schema.sql no SQL Editor do Supabase.' : friendly(msg),
     })
@@ -275,4 +370,42 @@ export async function sync() {
       schedule(500)
     }
   }
+}
+
+function markFirstAccess() {
+  // Primeiro acesso neste aparelho: o que já existe aqui precisa ser preservado e enviado.
+  if (meta.seen.personal || meta.seen.finance) return
+  const s = useStore.getState()
+  meta.dirty = { personal: s.events.length > 0 || s.measurements.length > 0 || s.healthReady, finance: s.txs.length > 0 }
+  saveMeta()
+}
+
+function keepInSync() {
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && schedule(500))
+  setInterval(() => document.visibilityState === 'visible' && void sync(), 60000)
+}
+
+/** Dentro de um artefato do Claude: usa o banco do próprio artefato, com a conta Claude de quem abre. */
+export async function initArtifactCloud() {
+  useCloud.setState({ mode: 'artifact', status: 'syncing' })
+  const [db, user] = await Promise.all([use('db'), use('user')])
+  if (!db) {
+    useCloud.setState({ ready: true, status: 'off', error: 'Sem acesso ao armazenamento do artefato: os dados ficam só neste aparelho. Abra o artefato logado na sua conta Claude.' })
+    return
+  }
+  const [id, owner, canWrite] = user ? await Promise.all([user.id(), user.isOwner(), user.canEdit()]) : [null, false, false]
+  backend = artifactBackend(db, id, canWrite)
+  uid = id ?? 'convidado'
+  useCloud.setState({ configured: true, email: 'conta Claude', financeOwner: owner, personal: !!id, canWrite })
+  markFirstAccess()
+  keepInSync()
+  if (canWrite) {
+    // aviso em tempo real quando a outra pessoa grava os gastos
+    try {
+      db.doc('finance/config').onSnapshot(() => schedule(300), () => {})
+    } catch {
+      /* sem tempo real: a sincronização periódica continua */
+    }
+  }
+  await sync()
 }

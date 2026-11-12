@@ -13,7 +13,7 @@ export interface PdfLine {
 }
 
 /** Extrai as linhas de texto do PDF, de cima para baixo, com a posição horizontal de cada trecho. */
-export async function extractPdfLines(buf: ArrayBuffer, askPassword: () => string | null): Promise<PdfLine[]> {
+export async function extractPdfLines(buf: ArrayBuffer, askPassword: () => Promise<string | null>): Promise<PdfLine[]> {
   const pdfjs = await import('pdfjs-dist')
   const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url')
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default
@@ -21,9 +21,7 @@ export async function extractPdfLines(buf: ArrayBuffer, askPassword: () => strin
   const task = pdfjs.getDocument({ data: new Uint8Array(buf) })
   // Faturas enviadas por e-mail costumam vir protegidas por senha.
   task.onPassword = (update: (pw: string) => void) => {
-    const pw = askPassword()
-    if (pw === null) task.destroy()
-    else update(pw)
+    void askPassword().then((pw) => (pw === null ? void task.destroy() : update(pw)))
   }
   const doc = await task.promise
   const lines: PdfLine[] = []

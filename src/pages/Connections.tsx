@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { configure, disconnect, getConfig, shareFinance, signIn, signOut, sync, useCloud } from '../cloud'
+import { confirmDialog } from '../dialog'
+import { inArtifact } from '../platform'
 import { authorizeUrl, redirectUri } from '../strava'
 import { syncStrava, useStore } from '../store'
 
@@ -21,6 +23,34 @@ export function CloudCard() {
     setBusy(true)
     setMsg((await signIn(email, password, create)) ?? '')
     setBusy(false)
+  }
+
+  if (cloud.mode === 'artifact') {
+    return (
+      <div className="card">
+        <p>
+          <span className={`status-dot ${cloud.configured && cloud.status !== 'error' ? 'on' : ''}`} />
+          {cloud.configured ? 'Dados guardados na sua conta Claude' : 'Dados só neste aparelho'}
+        </p>
+        <p className="small muted" style={{ marginTop: 4 }}>
+          {cloud.status === 'syncing' ? 'Sincronizando…' : cloud.error ? cloud.error : `Sincronizado em ${when(cloud.lastSync)}`}
+        </p>
+        {cloud.configured && (
+          <p className="small muted" style={{ marginTop: 12 }}>
+            {!cloud.canWrite
+              ? 'Você está com acesso só de leitura a este artefato, então não vê nem altera os gastos. Peça ao dono para adicionar você como Editor(a).'
+              : cloud.financeOwner
+                ? 'Para dividir os gastos, use o botão Compartilhar do artefato e convide a outra pessoa por e-mail como Editora. Ela vê e lança os gastos; missões e saúde continuam só seus.'
+                : `Você está usando os gastos compartilhados com você.${cloud.personal ? '' : ' Suas missões e dados de saúde ficam só neste aparelho.'}`}
+          </p>
+        )}
+        {cloud.configured && (
+          <button className="btn ghost" style={{ marginTop: 12 }} onClick={() => void sync()}>
+            Sincronizar agora
+          </button>
+        )}
+      </div>
+    )
   }
 
   if (!cloud.configured) {
@@ -68,7 +98,7 @@ export function CloudCard() {
           <button className="btn ghost" disabled={busy || !email || password.length < 6} onClick={() => login(true)}>
             Criar conta
           </button>
-          <button className="btn ghost" onClick={() => confirm('Desconectar este aparelho do Supabase? Os dados locais continuam aqui.') && disconnect()}>
+          <button className="btn ghost" onClick={async () => (await confirmDialog('Desconectar este aparelho do Supabase? Os dados locais continuam aqui.', 'Desconectar')) && disconnect()}>
             Trocar projeto
           </button>
         </div>
@@ -137,12 +167,12 @@ export function StravaCard() {
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
-  if (strava?.refreshToken) {
+  if (strava?.refreshToken || strava?.connector) {
     return (
       <div className="card">
         <p>
           <span className="status-dot on" />
-          Conectado{strava.athlete ? ` como ${strava.athlete}` : ''}
+          {strava.connector ? 'Ligado pelo conector do Claude' : `Conectado${strava.athlete ? ` como ${strava.athlete}` : ''}`}
         </p>
         <p className="small muted" style={{ marginTop: 4 }}>
           Última leitura: {when(strava.lastSync)}. Corridas concluem a missão de corrida; musculação, Crossfit e HIIT concluem a de força. Com o Strava ligado, não
@@ -165,10 +195,41 @@ export function StravaCard() {
           >
             Buscar treinos agora
           </button>
-          <button className="btn ghost" onClick={() => confirm('Desconectar o Strava?') && setStrava(null)}>
+          <button className="btn ghost" onClick={async () => (await confirmDialog('Desconectar o Strava?', 'Desconectar')) && setStrava(null)}>
             Desconectar
           </button>
         </div>
+        {msg && <p className="notice">{msg}</p>}
+      </div>
+    )
+  }
+
+  if (inArtifact) {
+    return (
+      <div className="card">
+        <p className="small muted">
+          Usa o conector Strava da sua conta Claude: nada de chaves. No primeiro uso o Claude pede sua permissão. Corridas concluem a missão de corrida; musculação,
+          Crossfit e HIIT concluem a de força.
+        </p>
+        <button
+          className="btn"
+          style={{ marginTop: 12 }}
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            setStrava({ clientId: '', clientSecret: '', seen: [], connector: true })
+            try {
+              const n = await syncStrava()
+              setMsg(n ? `${n} treino(s) contabilizado(s).` : 'Ligado. Nenhum treino novo desde o início do jogo.')
+            } catch (e) {
+              setStrava(null)
+              setMsg(e instanceof Error ? e.message : 'Falha ao ler o Strava.')
+            }
+            setBusy(false)
+          }}
+        >
+          Ligar o Strava
+        </button>
         {msg && <p className="notice">{msg}</p>}
       </div>
     )

@@ -31,6 +31,10 @@ npm run build    # gera a pasta dist/ (site estático, instalável no celular co
 - `src/strava.ts` — login e leitura de treinos do Strava
 - `src/pages/` — telas
 
+## Rodar como artefato do Claude
+
+`npm run build:artifact` gera `dist-artifact/page.html` e os arquivos do leitor de PDF. Dentro do artefato o app usa o banco do próprio artefato (gastos compartilhados em `finance/`, dados pessoais em `data/users/<id>/`) e o conector Strava da conta Claude, no lugar de Supabase e do login do Strava.
+
 ## Publicação, nuvem e Strava
 
 O app é um site estático. As conexões são configuradas dentro do app, em Ajustes — nenhuma chave fica no repositório.

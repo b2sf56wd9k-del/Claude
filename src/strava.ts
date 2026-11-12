@@ -13,6 +13,8 @@ export interface StravaState {
   /** ids de atividades já contabilizadas */
   seen: number[]
   lastSync?: string
+  /** dentro de um artefato: lê pelo conector Strava da conta Claude, sem chaves próprias */
+  connector?: boolean
 }
 
 export interface Activity {
@@ -72,6 +74,36 @@ export async function fetchActivities(accessToken: string, afterSec: number): Pr
     const batch = (await r.json()) as Activity[]
     out.push(...batch)
     if (batch.length < 100) break
+  }
+  return out
+}
+
+/** Lê as atividades pelo conector Strava do Claude (só dentro de um artefato). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fetchViaConnector(mcp: any, sinceISO: string): Promise<Activity[]> {
+  const out: Activity[] = []
+  let after: string | undefined
+  for (let page = 0; page < 3; page++) {
+    let res
+    try {
+      res = await mcp.callTool('Strava', 'list_activities', { first: 100, range_start: `${sinceISO}T00:00:00`, ordering: 'StartDateLocalAsc', ...(after ? { after } : {}) }, { cache: false })
+    } catch (e) {
+      const code = (e as { code?: string })?.code
+      throw new Error(
+        code === 'server_not_connected' || code === 'needs_reauth' || code === 'selection_required'
+          ? 'Conecte (ou reconecte) o Strava em claude.ai → Configurações → Conectores.'
+          : code === 'not_in_manifest' || code === 'approval_required' || code === 'consent_required' || code === 'not_granted'
+            ? 'O acesso ao Strava não foi permitido para este artefato. Toque de novo e permita quando o Claude perguntar.'
+            : 'O Strava não respondeu agora. Tente de novo em alguns minutos.',
+      )
+    }
+    const p = (res?.payload ?? {}) as { activities?: { id: string | number; name?: string; sport_type?: string; start_local?: string; summary?: { distance?: number } }[]; has_next_page?: boolean; end_cursor?: string }
+    for (const a of p.activities ?? []) {
+      if (!a.start_local) continue
+      out.push({ id: Number(a.id), name: a.name ?? 'Treino', sport_type: a.sport_type, start_date_local: a.start_local, distance: a.summary?.distance })
+    }
+    if (!p.has_next_page || !p.end_cursor) break
+    after = p.end_cursor
   }
   return out
 }

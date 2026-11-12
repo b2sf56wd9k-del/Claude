@@ -4,6 +4,7 @@ import { brl, monthLabel, monthOf, shiftMonth, summarize } from '../finance/cate
 import { decodeBytes, parseStatement, type ParsedTx, type Source } from '../finance/parse'
 import { extractPdfLines, parsePdfLines } from '../finance/pdf'
 import { useCloud } from '../cloud'
+import { promptDialog } from '../dialog'
 import { BUDGET_XP, IMPORT_XP, useStore } from '../store'
 
 export default function Finance() {
@@ -228,7 +229,7 @@ function Importer(p: {
         const buf = await f.arrayBuffer()
         const isPdf = /\.pdf$/i.test(f.name)
         const parsed = isPdf
-          ? parsePdfLines(await extractPdfLines(buf, () => prompt(`"${f.name}" é protegido por senha. Digite a senha do PDF:`)), source, toISO(new Date()))
+          ? parsePdfLines(await extractPdfLines(buf, () => promptDialog(`"${f.name}" é protegido por senha. Digite a senha do PDF:`, 'Abrir')), source, toISO(new Date()))
           : parseStatement(f.name, decodeBytes(buf), source)
         const r = p.onImport(parsed, source, owner)
         const out = parsed.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0)

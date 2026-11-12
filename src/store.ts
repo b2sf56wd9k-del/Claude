@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import {
   DEFAULT_QUESTS,
   advanceQuest,
@@ -24,7 +24,8 @@ import {
   type Tx,
 } from './finance/categorize'
 import type { ParsedTx, Source } from './finance/parse'
-import { applyActivities, ensureFresh, exchangeCode, fetchActivities, type StravaState } from './strava'
+import { applyActivities, ensureFresh, exchangeCode, fetchActivities, fetchViaConnector, type StravaState } from './strava'
+import { use } from './platform'
 import { DEFAULT_PROFILE, targets, type HealthProfile, type Measurement } from './health'
 
 export const IMPORT_XP = 40
@@ -248,7 +249,33 @@ export const useStore = create<Data & Actions>()(
       replaceAll: (d) => set(d),
       reset: () => set(initial()),
     }),
-    { name: 'ascensao-v1' },
+    {
+      name: 'ascensao-v1',
+      // o armazenamento do navegador pode estar bloqueado (janela privada, pré-visualização)
+      storage: createJSONStorage(() => ({
+        getItem: (k) => {
+          try {
+            return localStorage.getItem(k)
+          } catch {
+            return null
+          }
+        },
+        setItem: (k, v) => {
+          try {
+            localStorage.setItem(k, v)
+          } catch {
+            /* segue só em memória */
+          }
+        },
+        removeItem: (k) => {
+          try {
+            localStorage.removeItem(k)
+          } catch {
+            /* nada a remover */
+          }
+        },
+      })),
+    },
   ),
 )
 
@@ -269,11 +296,19 @@ export async function finishStravaLogin(code: string) {
 /** Busca atividades novas e conclui as missões de corrida e força. Devolve quantas contaram. */
 export async function syncStrava(): Promise<number> {
   const s = useStore.getState()
-  if (!s.strava?.refreshToken) return 0
-  const st = await ensureFresh(s.strava, Math.floor(Date.now() / 1000))
+  if (!s.strava?.refreshToken && !s.strava?.connector) return 0
   // desde o início da semana em que o jogo começou, no máximo 30 dias atrás
   const floor = Math.max(Date.parse(weekStart(s.startDate) + 'T00:00:00'), Date.now() - 30 * 86400000)
-  const acts = await fetchActivities(st.accessToken!, Math.floor(floor / 1000))
+  let st = s.strava
+  let acts
+  if (st.connector) {
+    const mcp = await use('mcp')
+    if (!mcp) throw new Error('O conector do Strava não está disponível nesta visualização.')
+    acts = await fetchViaConnector(mcp, toISO(new Date(floor)))
+  } else {
+    st = await ensureFresh(st, Math.floor(Date.now() / 1000))
+    acts = await fetchActivities(st.accessToken!, Math.floor(floor / 1000))
+  }
   const cur = useStore.getState()
   const r = applyActivities(cur.events, cur.quests, st.seen, acts)
   useStore.setState({ events: r.events, strava: { ...st, seen: r.seen, lastSync: new Date().toISOString() } })
