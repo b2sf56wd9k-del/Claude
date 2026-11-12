@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { questCount, toISO } from '../game'
-import { GOALS, assess, composition, strengthPlan, targets, weekLayout, type Goal, type HealthProfile, type Measurement, type Sex } from '../health'
+import { GOALS, PURPOSES, assess, composition, strengthPlan, targets, weekLayout, type Goal, type HealthProfile, type Measurement, type Sex } from '../health'
 import { MEASURE_XP, latestMeasurement, useStore } from '../store'
 
 const num = (s: string) => {
@@ -167,7 +167,12 @@ export default function Health() {
         <>
           <div className="card">
             <p className="small">{plan.summary}</p>
-            <p className="notice">{weekLayout(health.runDays, health.strengthDays)}</p>
+            <ul className="tips">
+              {plan.principles.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+            <p className="notice">Semana sugerida: {weekLayout(health.runDays, health.strengthDays)}</p>
             <ul className="tips">
               {plan.tips.map((t) => (
                 <li key={t}>{t}</li>
@@ -188,7 +193,7 @@ export default function Health() {
               {w.exercises.map((e) => (
                 <div className="ex" key={e.name}>
                   <span>
-                    {e.name}
+                    {e.name} <span className="tag">{PURPOSES[e.purpose]}</span>
                     {e.note && <span className="muted small"> — {e.note}</span>}
                   </span>
                   <b>{e.sets}</b>
@@ -196,6 +201,16 @@ export default function Health() {
               ))}
             </div>
           ))}
+          <details className="card">
+            <summary>Base científica do plano</summary>
+            {plan.studies.map((st) => (
+              <div className="study" key={st.ref}>
+                <p className="small">{st.finding}</p>
+                <p className="small muted">{st.ref}</p>
+              </div>
+            ))}
+            <p className="notice">O plano aplica as conclusões desses estudos; a escolha exata de exercícios e a divisão dos dias são minhas, não saíram prontas de um estudo.</p>
+          </details>
         </>
       )}
     </>

@@ -151,3 +151,14 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; 
 .ex { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .ex b { white-space: nowrap; font-weight: 600; color: var(--text-2); }
 ul.tips { margin: 8px 0 0; padding-left: 18px; color: var(--text-2); font-size: 13px; }
+details.card { margin-top: 12px; }
+details.card summary { cursor: pointer; font-weight: 600; }
+.study { padding: 10px 0; border-top: 1px solid var(--line); }
+.study:first-of-type { border-top: 0; margin-top: 6px; }
+.ex .tag { margin-left: 4px; white-space: nowrap; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+.status-dot.on { background: var(--good); }
+input[type='password'], input[type='email'] { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.toast { display: block; width: 100%; text-align: left; margin-bottom: 12px; background: var(--card); border: 1px solid var(--accent-dim); border-radius: 10px; padding: 10px 12px; font-size: 14px; cursor: pointer; }
+.form > * { min-width: 0; }
+label.field input, label.field select { width: 100%; }

@@ -27,11 +27,22 @@ npm run build    # gera a pasta dist/ (site estático, instalável no celular co
 - `src/finance/pdf.ts` — leitura de extrato e fatura em PDF
 - `src/finance/categorize.ts` — categorias, regras e resumos mensais
 - `src/store.ts` — estado persistido
+- `src/cloud.ts` — sincronização com Supabase
+- `src/strava.ts` — login e leitura de treinos do Strava
 - `src/pages/` — telas
+
+## Publicação, nuvem e Strava
+
+O app é um site estático. As conexões são configuradas dentro do app, em Ajustes — nenhuma chave fica no repositório.
+
+1. **Publicar**: em Settings → Pages do repositório, escolha "GitHub Actions" como fonte. O workflow `deploy.yml` publica a cada push.
+2. **Nuvem (Supabase)**: crie um projeto, rode `supabase/schema.sql` no SQL Editor e cole o endereço do projeto e a chave pública em Ajustes. Cada pessoa cria a própria conta; quem importou os gastos informa o e-mail da outra em "Dividir os gastos com".
+3. **Strava**: crie um aplicativo em strava.com/settings/api com o domínio do site em "Authorization Callback Domain" e cole Client ID e Client Secret em Ajustes.
+
+Só os gastos são compartilhados; missões, saúde e Strava ficam na conta de cada um.
 
 ## Próximos passos
 
-1. Sincronização entre aparelhos (para o casal ver os mesmos gastos)
-2. Strava: corridas concluem a missão automaticamente
-3. Google Agenda
-4. Investimentos (aportes e metas)
+1. Google Agenda
+2. Investimentos (aportes e metas)
+3. Registro de refeições

@@ -24,6 +24,7 @@ import {
   type Tx,
 } from './finance/categorize'
 import type { ParsedTx, Source } from './finance/parse'
+import { applyActivities, ensureFresh, exchangeCode, fetchActivities, type StravaState } from './strava'
 import { DEFAULT_PROFILE, targets, type HealthProfile, type Measurement } from './health'
 
 export const IMPORT_XP = 40
@@ -44,6 +45,7 @@ export interface Data {
   /** false até o usuário salvar o perfil de saúde pela primeira vez */
   healthReady: boolean
   measurements: Measurement[]
+  strava: StravaState | null
 }
 
 interface Actions {
@@ -56,6 +58,7 @@ interface Actions {
   saveHealth: (p: HealthProfile) => void
   addMeasurement: (m: Measurement) => void
   removeMeasurement: (date: string) => void
+  setStrava: (st: StravaState | null) => void
   setTxCategory: (txId: string, categoryId: string) => void
   removeMonth: (month: string, source: Source, owner: number) => void
   setBudget: (categoryId: string, budget: number) => void
@@ -80,6 +83,7 @@ const initial = (): Data => ({
   health: DEFAULT_PROFILE,
   healthReady: false,
   measurements: [],
+  strava: null,
 })
 
 export const latestMeasurement = (list: Measurement[]) =>
@@ -238,6 +242,8 @@ export const useStore = create<Data & Actions>()(
 
       removeMeasurement: (date) => set((s) => ({ measurements: s.measurements.filter((m) => m.date !== date) })),
 
+      setStrava: (strava) => set({ strava }),
+
       setProfile: (p) => set(p),
       replaceAll: (d) => set(d),
       reset: () => set(initial()),
@@ -247,6 +253,29 @@ export const useStore = create<Data & Actions>()(
 )
 
 export function snapshot(): Data {
-  const { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements } = useStore.getState()
-  return { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements }
+  const { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava } = useStore.getState()
+  return { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava }
+}
+
+// ---------- Strava ----------
+
+/** Conclui o login depois que o Strava devolve o código de autorização. */
+export async function finishStravaLogin(code: string) {
+  const st = useStore.getState().strava
+  if (!st) throw new Error('Informe o Client ID e o Client Secret antes de conectar.')
+  useStore.getState().setStrava(await exchangeCode(st, code))
+}
+
+/** Busca atividades novas e conclui as missões de corrida e força. Devolve quantas contaram. */
+export async function syncStrava(): Promise<number> {
+  const s = useStore.getState()
+  if (!s.strava?.refreshToken) return 0
+  const st = await ensureFresh(s.strava, Math.floor(Date.now() / 1000))
+  // desde o início da semana em que o jogo começou, no máximo 30 dias atrás
+  const floor = Math.max(Date.parse(weekStart(s.startDate) + 'T00:00:00'), Date.now() - 30 * 86400000)
+  const acts = await fetchActivities(st.accessToken!, Math.floor(floor / 1000))
+  const cur = useStore.getState()
+  const r = applyActivities(cur.events, cur.quests, st.seen, acts)
+  useStore.setState({ events: r.events, strava: { ...st, seen: r.seen, lastSync: new Date().toISOString() } })
+  return r.added
 }

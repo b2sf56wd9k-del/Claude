@@ -167,10 +167,16 @@ export function assess(p: HealthProfile, list: Measurement[]): Finding[] {
 }
 
 // ---------- musculação ----------
+// Plano híbrido: desempenho na corrida + estética, montado sobre as referências em STUDIES.
+
+/** Para que serve o exercício no plano */
+export type Purpose = 'corrida' | 'estetica' | 'prevencao'
+export const PURPOSES: Record<Purpose, string> = { corrida: 'Corrida', estetica: 'Estética', prevencao: 'Prevenção' }
 
 export interface Exercise {
   name: string
   sets: string
+  purpose: Purpose
   note?: string
 }
 export interface Workout {
@@ -178,168 +184,128 @@ export interface Workout {
   focus: string
   exercises: Exercise[]
 }
+export interface Study {
+  ref: string
+  finding: string
+}
 export interface StrengthPlan {
   summary: string
+  principles: string[]
   tips: string[]
   workouts: Workout[]
+  studies: Study[]
 }
 
-const E = (name: string, sets: string, note?: string): Exercise => ({ name, sets, note })
+export const STUDIES: Study[] = [
+  {
+    ref: 'Blagrove, Howatson e Hayes, Sports Medicine, 2018 (revisão sistemática)',
+    finding: 'Treino de força melhorou a economia de corrida em 2 a 8% e tendeu a melhorar provas de 1,5 a 10 km, sem prejudicar a composição corporal. Recomendam 2 a 3 sessões por semana.',
+  },
+  {
+    ref: 'Llanos-Lagos e colaboradores, Sports Medicine, 2024 (meta-análise)',
+    finding: 'Cargas altas, pliometria e a combinação dos dois melhoram a economia de corrida; cargas submáximas e isometria sozinhas não mostraram efeito.',
+  },
+  {
+    ref: 'Støren e colaboradores, Medicine & Science in Sports & Exercise, 2008',
+    finding: 'Meio agachamento 4 × 4 com carga máxima, 3 vezes por semana por 8 semanas: +5% de economia de corrida e +21% de tempo até a exaustão, sem ganho de peso. Estudo pequeno (17 corredores).',
+  },
+  {
+    ref: 'Schoenfeld, Ogborn e Krieger, Journal of Sports Sciences, 2017 (meta-análise)',
+    finding: 'Hipertrofia cresce com o volume semanal: 10 ou mais séries por músculo na semana renderam bem mais que menos de 5.',
+  },
+  {
+    ref: 'Schoenfeld, Ogborn e Krieger, Sports Medicine, 2016 (meta-análise)',
+    finding: 'Treinar cada músculo 2 vezes por semana gerou mais hipertrofia do que 1 vez.',
+  },
+  {
+    ref: 'Schumann e colaboradores, Sports Medicine, 2022 (meta-análise)',
+    finding: 'Combinar aeróbico e força não comprometeu hipertrofia nem força máxima. A potência é que sofre, principalmente quando os dois treinos são na mesma sessão: separe corrida e força por pelo menos 3 horas.',
+  },
+  {
+    ref: 'Lauersen, Bertelsen e Andersen, British Journal of Sports Medicine, 2014 (meta-análise)',
+    finding: 'Em esportes em geral, treino de força reduziu lesões a menos de um terço e quase pela metade as lesões por sobrecarga. Alongamento não mostrou efeito protetor.',
+  },
+]
 
-const PLANS: Record<Goal, { summary: string; tips: string[]; workouts: Workout[] }> = {
-  performance: {
-    summary: 'Força para correr melhor: cargas altas com poucas repetições, exercícios unilaterais, panturrilha e core. Pouco volume, para não atrapalhar a corrida.',
-    tips: [
-      'Evite treino pesado de pernas na véspera do treino de tiro ou do longão.',
-      'Termine cada série com 2 repetições "sobrando": o objetivo é força, não exaustão.',
-      'Na semana de prova, faça só um treino leve.',
-    ],
-    workouts: [
-      {
-        name: 'Treino A',
-        focus: 'Pernas (força) e core',
-        exercises: [
-          E('Agachamento livre ou no smith', '4 × 5', 'carga alta, descida controlada'),
-          E('Levantamento terra romeno', '3 × 6'),
-          E('Afundo búlgaro', '3 × 8 cada perna'),
-          E('Panturrilha em pé', '4 × 8', 'pausa de 2 s embaixo'),
-          E('Prancha frontal', '3 × 40 s'),
-          E('Pallof press', '3 × 10 cada lado'),
-        ],
-      },
-      {
-        name: 'Treino B',
-        focus: 'Posterior, unilateral e tronco',
-        exercises: [
-          E('Elevação pélvica com barra', '4 × 6'),
-          E('Step-up no banco', '3 × 8 cada perna'),
-          E('Stiff unilateral com halter', '3 × 8 cada perna'),
-          E('Panturrilha sentado (sóleo)', '4 × 10'),
-          E('Remada curvada', '3 × 8'),
-          E('Prancha lateral', '3 × 30 s cada lado'),
-        ],
-      },
-      {
-        name: 'Treino C',
-        focus: 'Potência e membros superiores',
-        exercises: [
-          E('Saltos pogo (tornozelo rígido)', '3 × 15', 'contatos rápidos com o chão'),
-          E('Salto sobre caixa', '4 × 4', 'desça caminhando'),
-          E('Agachamento frontal ou goblet', '3 × 6'),
-          E('Flexão nórdica (posterior)', '3 × 5'),
-          E('Supino com halteres', '3 × 8'),
-          E('Puxada alta ou barra fixa', '3 × 8'),
-          E('Prancha Copenhagen (adutores)', '2 × 20 s cada lado'),
-        ],
-      },
-    ],
-  },
-  hipertrofia: {
-    summary: 'Ganho de massa: corpo inteiro em cada sessão, 8 a 12 repetições perto da falha, aumentando carga ou repetições a cada semana.',
-    tips: [
-      'Progressão é o que gera resultado: anote as cargas e tente superar o treino anterior.',
-      'Descanse 1,5 a 2 minutos entre as séries.',
-      'Coloque o treino de pernas mais pesado longe do longão.',
-    ],
-    workouts: [
-      {
-        name: 'Treino A',
-        focus: 'Corpo inteiro, ênfase em empurrar',
-        exercises: [
-          E('Agachamento livre ou leg press', '4 × 8–10'),
-          E('Supino reto', '4 × 8–10'),
-          E('Remada baixa', '3 × 10–12'),
-          E('Desenvolvimento com halteres', '3 × 10'),
-          E('Cadeira extensora', '3 × 12'),
-          E('Tríceps na polia', '3 × 12'),
-          E('Abdominal na polia', '3 × 12'),
-        ],
-      },
-      {
-        name: 'Treino B',
-        focus: 'Corpo inteiro, ênfase em puxar',
-        exercises: [
-          E('Levantamento terra romeno', '4 × 8–10'),
-          E('Puxada alta ou barra fixa', '4 × 8–10'),
-          E('Supino inclinado com halteres', '3 × 10'),
-          E('Afundo búlgaro', '3 × 10 cada perna'),
-          E('Mesa flexora', '3 × 12'),
-          E('Rosca direta', '3 × 12'),
-          E('Panturrilha em pé', '4 × 10–12'),
-        ],
-      },
-      {
-        name: 'Treino C',
-        focus: 'Corpo inteiro, volume complementar',
-        exercises: [
-          E('Leg press', '4 × 10–12'),
-          E('Remada curvada', '4 × 8–10'),
-          E('Crucifixo ou peck deck', '3 × 12'),
-          E('Elevação lateral', '4 × 12–15'),
-          E('Elevação pélvica', '3 × 10'),
-          E('Rosca martelo + tríceps testa', '3 × 12 cada'),
-          E('Prancha frontal', '3 × 45 s'),
-        ],
-      },
-    ],
-  },
-  emagrecer: {
-    summary: 'Perda de gordura: o treino de força serve para preservar músculo enquanto a dieta faz o déficit. Exercícios compostos, 10 a 15 repetições, descanso curto.',
-    tips: [
-      'Mantenha as cargas: perder força durante a dieta é sinal de déficit grande demais.',
-      'Descanse cerca de 1 minuto entre as séries.',
-      'O gasto calórico extra vem da corrida; não transforme a musculação em cardio.',
-    ],
-    workouts: [
-      {
-        name: 'Treino A',
-        focus: 'Corpo inteiro',
-        exercises: [
-          E('Agachamento goblet ou leg press', '3 × 12'),
-          E('Supino com halteres', '3 × 12'),
-          E('Remada baixa', '3 × 12'),
-          E('Levantamento terra romeno', '3 × 10'),
-          E('Desenvolvimento com halteres', '3 × 12'),
-          E('Prancha frontal', '3 × 40 s'),
-        ],
-      },
-      {
-        name: 'Treino B',
-        focus: 'Corpo inteiro',
-        exercises: [
-          E('Afundo caminhando', '3 × 12 cada perna'),
-          E('Puxada alta', '3 × 12'),
-          E('Flexão de braço', '3 × máximo', 'pare 2 antes da falha'),
-          E('Elevação pélvica', '3 × 12'),
-          E('Panturrilha em pé', '3 × 15'),
-          E('Abdominal infra', '3 × 15'),
-        ],
-      },
-      {
-        name: 'Treino C',
-        focus: 'Circuito de corpo inteiro',
-        exercises: [
-          E('Step-up no banco', '3 × 12 cada perna'),
-          E('Remada unilateral com halter', '3 × 12 cada lado'),
-          E('Supino inclinado com halteres', '3 × 12'),
-          E('Mesa flexora', '3 × 12'),
-          E('Elevação lateral', '3 × 15'),
-          E('Prancha lateral', '3 × 30 s cada lado'),
-        ],
-      },
-    ],
-  },
+const X = (purpose: Purpose) => (name: string, sets: string, note?: string): Exercise => ({ name, sets, purpose, note })
+const run = X('corrida')
+const look = X('estetica')
+const prev = X('prevencao')
+
+const WORKOUT_A: Workout = {
+  name: 'Treino A',
+  focus: 'Pernas pesado + peito e costas',
+  exercises: [
+    run('Saltos pogo (tornozelo rígido)', '3 × 10', 'contatos curtos no chão; faça descansado, no início'),
+    run('Agachamento livre ou no smith', '4 × 4–5', 'carga alta (cerca de 85% do máximo), sobrando 1 a 2 repetições'),
+    look('Supino reto', '4 × 8–10', 'perto da falha'),
+    look('Remada curvada ou baixa', '4 × 8–10'),
+    run('Afundo búlgaro', '3 × 6–8 cada perna'),
+    look('Elevação lateral', '3 × 12–15'),
+    prev('Panturrilha em pé', '3 × 6–8', 'pesada, pausa de 2 s embaixo'),
+    prev('Prancha Copenhagen (adutores)', '2 × 20–30 s cada lado'),
+  ],
+}
+
+const WORKOUT_B: Workout = {
+  name: 'Treino B',
+  focus: 'Posterior pesado + ombros e dorsais',
+  exercises: [
+    run('Salto sobre caixa', '3 × 5', 'máxima altura, desça caminhando'),
+    run('Levantamento terra romeno', '4 × 5–6', 'carga alta, coluna neutra'),
+    look('Desenvolvimento com halteres', '4 × 8–10'),
+    look('Barra fixa ou puxada alta', '4 × 8–10'),
+    run('Elevação pélvica com barra', '3 × 6–8'),
+    look('Rosca direta + tríceps na polia', '3 × 10–12 cada'),
+    prev('Panturrilha sentado (sóleo)', '3 × 8–10', 'o sóleo é o músculo que mais trabalha na corrida'),
+    prev('Pallof press ou prancha lateral', '3 × 10 cada lado'),
+  ],
+}
+
+const WORKOUT_C: Workout = {
+  name: 'Treino C',
+  focus: 'Superior com volume + pernas leve (véspera do longão)',
+  exercises: [
+    look('Supino inclinado com halteres', '4 × 8–10'),
+    look('Puxada alta pegada neutra', '4 × 8–10'),
+    look('Elevação lateral', '4 × 12–15'),
+    look('Remada unilateral com halter', '3 × 10 cada lado'),
+    look('Rosca martelo + tríceps testa', '3 × 10–12 cada'),
+    run('Step-up no banco', '3 × 8 cada perna', 'carga moderada, sem chegar perto da falha'),
+    prev('Flexão nórdica (posterior de coxa)', '2 × 5', 'descida lenta'),
+    prev('Prancha frontal', '3 × 40 s'),
+  ],
 }
 
 export function strengthPlan(goal: Goal, days: 0 | 2 | 3): StrengthPlan | null {
   if (days === 0) return null
-  const p = PLANS[goal]
-  return { summary: p.summary, tips: p.tips, workouts: p.workouts.slice(0, days) }
+  const tips = [
+    'Separe a musculação da corrida por pelo menos 3 horas; se for no mesmo dia, corra primeiro quando o treino de corrida for o de qualidade.',
+    'Evite o treino pesado de pernas na véspera do tiro ou do longão.',
+    'Anote as cargas e tente superar o treino anterior: sem progressão não há ganho nem de força nem de músculo.',
+    'Na semana de prova, mantenha a carga e corte o número de séries pela metade.',
+  ]
+  if (goal === 'emagrecer') tips.push('Em déficit calórico o objetivo na academia é manter as cargas: se a força cair, o déficit está grande demais.')
+  if (goal === 'hipertrofia') tips.push('Com excedente calórico dá para somar 1 série aos exercícios de superior a cada 2 semanas, até 5 séries.')
+  return {
+    summary:
+      days === 3
+        ? 'Três sessões: duas com pernas pesadas (o que melhora a economia de corrida) e uma de superior com mais volume. Cada músculo do tronco é treinado 2 a 3 vezes por semana, com cerca de 10 séries semanais ou mais — a faixa que os estudos associam a mais hipertrofia.'
+        : 'Duas sessões de corpo inteiro: pernas com carga alta para a corrida e superior com 8 a 10 repetições para a estética. Com 2 dias o volume de superior fica em cerca de 8 séries semanais por músculo: o ganho estético vem, mas mais devagar do que com 3 dias.',
+    principles: [
+      'Pernas: poucas repetições com carga alta e saltos. É o tipo de treino com efeito comprovado na economia de corrida, e quase não aumenta o peso corporal.',
+      'Tronco e braços: 8 a 15 repetições perto da falha, com volume semanal suficiente. É onde está o ganho estético, sem atrapalhar a corrida.',
+      'Panturrilha, posterior, adutores e core: reforço das estruturas que mais sofrem com a corrida.',
+    ],
+    tips,
+    workouts: days === 3 ? [WORKOUT_A, WORKOUT_B, WORKOUT_C] : [WORKOUT_A, WORKOUT_B],
+    studies: STUDIES,
+  }
 }
 
 /** Sugestão de semana encaixando a força entre as corridas. */
 export function weekLayout(runDays: number, strengthDays: 0 | 2 | 3): string {
-  if (runDays === 3 && strengthDays === 2) return 'Seg força A · Ter corrida · Qua força B · Qui corrida · Sex descanso · Sáb longão · Dom descanso'
-  if (runDays === 3 && strengthDays === 3) return 'Seg força A · Ter corrida · Qua força B · Qui corrida · Sex força C (leve de pernas) · Sáb longão · Dom descanso'
+  if (runDays === 3 && strengthDays === 2) return 'Seg treino A · Ter corrida · Qua descanso · Qui corrida · Sex treino B · Sáb descanso · Dom longão'
+  if (runDays === 3 && strengthDays === 3) return 'Seg treino A · Ter corrida · Qua treino B · Qui corrida · Sex descanso · Sáb treino C · Dom longão'
   return 'Alterne corrida e força, deixando ao menos um dia de descanso total na semana.'
 }

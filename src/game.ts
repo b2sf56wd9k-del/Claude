@@ -140,13 +140,13 @@ function syncBonus(events: XpEvent[], quests: Quest[], date: string): XpEvent[] 
 }
 
 /** Avança um passo da missão (até a meta). */
-export function advanceQuest(events: XpEvent[], quests: Quest[], q: Quest, date: string): XpEvent[] {
+export function advanceQuest(events: XpEvent[], quests: Quest[], q: Quest, date: string, label = q.title): XpEvent[] {
   const count = questCount(events, q, date)
   if (count >= q.target) return events
   const step = count + 1
   const next = [
     ...events,
-    { key: stepPrefix(q, date) + step, date, attr: q.attr, xp: stepXp(q, step), label: q.title },
+    { key: stepPrefix(q, date) + step, date, attr: q.attr, xp: stepXp(q, step), label },
   ]
   return syncBonus(next, quests, date)
 }

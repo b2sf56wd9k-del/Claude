@@ -199,7 +199,54 @@ describe('saúde', () => {
   })
   it('plano de musculação segue os dias escolhidos', () => {
     expect(strengthPlan('performance', 0)).toBeNull()
+    expect(strengthPlan('performance', 3)!.studies.length).toBeGreaterThan(4)
     expect(strengthPlan('performance', 2)!.workouts).toHaveLength(2)
     expect(strengthPlan('hipertrofia', 3)!.workouts).toHaveLength(3)
+  })
+})
+
+import { applyActivities, questFor } from './strava'
+import { mergeFinance, mergePersonal, type Finance, type Personal } from './cloud'
+import { DEFAULT_PROFILE } from './health'
+
+describe('Strava', () => {
+  const act = (id: number, sport_type: string, date: string, distance = 0) => ({ id, name: `Treino ${id}`, sport_type, start_date_local: `${date}T06:30:00Z`, distance })
+  it('mapeia o tipo de atividade para a missão', () => {
+    expect(questFor(act(1, 'Run', '2026-11-10'))).toBe('corrida')
+    expect(questFor(act(1, 'WeightTraining', '2026-11-10'))).toBe('forca')
+    expect(questFor(act(1, 'Ride', '2026-11-10'))).toBeNull()
+  })
+  it('contabiliza cada atividade uma vez, na semana certa, até a meta', () => {
+    const acts = [act(1, 'Run', '2026-11-03', 8000), act(2, 'Run', '2026-11-10', 10000), act(3, 'WeightTraining', '2026-11-11'), act(4, 'Ride', '2026-11-11')]
+    const r1 = applyActivities([], Q, [], acts)
+    expect(r1.added).toBe(3)
+    expect(questCount(r1.events, q('corrida'), '2026-11-12')).toBe(1)
+    expect(questCount(r1.events, q('corrida'), '2026-11-05')).toBe(1)
+    expect(r1.events.find((e) => e.label.includes('10,0 km'))).toBeTruthy()
+    const r2 = applyActivities(r1.events, Q, r1.seen, acts)
+    expect(r2.added).toBe(0)
+    expect(r2.events).toBe(r1.events)
+    // quatro corridas na mesma semana com meta 3: a quarta não gera XP extra
+    const many = [5, 6, 7, 8].map((i) => act(i, 'Run', '2026-11-1' + (i - 4)))
+    expect(applyActivities([], Q, [], many).added).toBe(3)
+  })
+})
+
+describe('nuvem', () => {
+  const ev = (key: string) => ({ key, date: '2026-11-10', attr: 'mente' as const, xp: 10, label: key })
+  const tx = (id: string, categoryId = 'outros') => ({ id, date: '2026-11-10', description: id, amount: -10, source: 'conta' as const, owner: 0, categoryId })
+  it('junta dados pessoais sem duplicar', () => {
+    const base: Personal = { name: 'A', startDate: '2026-11-10', quests: Q, events: [ev('a'), ev('b')], health: DEFAULT_PROFILE, healthReady: false, measurements: [], strava: null }
+    const m = mergePersonal(base, { startDate: '2026-11-01', events: [ev('b'), ev('c')], measurements: [{ date: '2026-11-02', weightKg: 80 }], healthReady: true, health: { ...DEFAULT_PROFILE, heightCm: 180 } })
+    expect(m.events.map((e) => e.key)).toEqual(['a', 'b', 'c'])
+    expect(m.startDate).toBe('2026-11-01')
+    expect(m.measurements).toHaveLength(1)
+    expect(m.health.heightCm).toBe(180)
+  })
+  it('junta gastos: o aparelho vence nos lançamentos que já tem', () => {
+    const local: Finance = { people: ['Eu', 'Esposa'], txs: [tx('1', 'mercado')], categories: DEFAULT_CATEGORIES, rules: [{ pattern: 'x', categoryId: 'lazer' }] }
+    const m = mergeFinance(local, { txs: [tx('1'), tx('2')], rules: [{ pattern: 'x', categoryId: 'outros' }, { pattern: 'y', categoryId: 'saude' }] })
+    expect(m.txs.map((t) => [t.id, t.categoryId])).toEqual([['1', 'mercado'], ['2', 'outros']])
+    expect(m.rules).toHaveLength(2)
   })
 })

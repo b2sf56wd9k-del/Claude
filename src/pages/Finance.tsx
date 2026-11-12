@@ -3,6 +3,7 @@ import { toISO } from '../game'
 import { brl, monthLabel, monthOf, shiftMonth, summarize } from '../finance/categorize'
 import { decodeBytes, parseStatement, type ParsedTx, type Source } from '../finance/parse'
 import { extractPdfLines, parsePdfLines } from '../finance/pdf'
+import { useCloud } from '../cloud'
 import { BUDGET_XP, IMPORT_XP, useStore } from '../store'
 
 export default function Finance() {
@@ -213,7 +214,8 @@ function Importer(p: {
   onDone: (month: string | null) => void
 }) {
   const [source, setSource] = useState<Source>('cartao')
-  const [owner, setOwner] = useState(0)
+  // quem recebeu o compartilhamento é a pessoa 2
+  const [owner, setOwner] = useState(() => (useCloud.getState().financeOwner ? 0 : 1))
   const [msg, setMsg] = useState('')
   const input = useRef<HTMLInputElement>(null)
 
