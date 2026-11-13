@@ -167,23 +167,13 @@ export function assess(p: HealthProfile, list: Measurement[]): Finding[] {
 }
 
 // ---------- musculação ----------
-// Plano híbrido: desempenho na corrida + estética, montado sobre as referências em STUDIES.
+// Princípios do plano de força. Prioridade: 1) desempenho na corrida, 2) estética e composição corporal.
+// Os treinos em si ficam em workout/plan.ts e os exercícios em workout/exercises.ts.
 
 /** Para que serve o exercício no plano */
 export type Purpose = 'corrida' | 'estetica' | 'prevencao'
 export const PURPOSES: Record<Purpose, string> = { corrida: 'Corrida', estetica: 'Estética', prevencao: 'Prevenção' }
 
-export interface Exercise {
-  name: string
-  sets: string
-  purpose: Purpose
-  note?: string
-}
-export interface Workout {
-  name: string
-  focus: string
-  exercises: Exercise[]
-}
 export interface Study {
   ref: string
   finding: string
@@ -192,7 +182,6 @@ export interface StrengthPlan {
   summary: string
   principles: string[]
   tips: string[]
-  workouts: Workout[]
   studies: Study[]
 }
 
@@ -227,56 +216,6 @@ export const STUDIES: Study[] = [
   },
 ]
 
-const X = (purpose: Purpose) => (name: string, sets: string, note?: string): Exercise => ({ name, sets, purpose, note })
-const run = X('corrida')
-const look = X('estetica')
-const prev = X('prevencao')
-
-const WORKOUT_A: Workout = {
-  name: 'Treino A',
-  focus: 'Pernas pesado + peito e costas',
-  exercises: [
-    run('Saltos pogo (tornozelo rígido)', '3 × 10', 'contatos curtos no chão; faça descansado, no início'),
-    run('Agachamento livre ou no smith', '4 × 4–5', 'carga alta (cerca de 85% do máximo), sobrando 1 a 2 repetições'),
-    look('Supino reto', '4 × 8–10', 'perto da falha'),
-    look('Remada curvada ou baixa', '4 × 8–10'),
-    run('Afundo búlgaro', '3 × 6–8 cada perna'),
-    look('Elevação lateral', '3 × 12–15'),
-    prev('Panturrilha em pé', '3 × 6–8', 'pesada, pausa de 2 s embaixo'),
-    prev('Prancha Copenhagen (adutores)', '2 × 20–30 s cada lado'),
-  ],
-}
-
-const WORKOUT_B: Workout = {
-  name: 'Treino B',
-  focus: 'Posterior pesado + ombros e dorsais',
-  exercises: [
-    run('Salto sobre caixa', '3 × 5', 'máxima altura, desça caminhando'),
-    run('Levantamento terra romeno', '4 × 5–6', 'carga alta, coluna neutra'),
-    look('Desenvolvimento com halteres', '4 × 8–10'),
-    look('Barra fixa ou puxada alta', '4 × 8–10'),
-    run('Elevação pélvica com barra', '3 × 6–8'),
-    look('Rosca direta + tríceps na polia', '3 × 10–12 cada'),
-    prev('Panturrilha sentado (sóleo)', '3 × 8–10', 'o sóleo é o músculo que mais trabalha na corrida'),
-    prev('Pallof press ou prancha lateral', '3 × 10 cada lado'),
-  ],
-}
-
-const WORKOUT_C: Workout = {
-  name: 'Treino C',
-  focus: 'Superior com volume + pernas leve (véspera do longão)',
-  exercises: [
-    look('Supino inclinado com halteres', '4 × 8–10'),
-    look('Puxada alta pegada neutra', '4 × 8–10'),
-    look('Elevação lateral', '4 × 12–15'),
-    look('Remada unilateral com halter', '3 × 10 cada lado'),
-    look('Rosca martelo + tríceps testa', '3 × 10–12 cada'),
-    run('Step-up no banco', '3 × 8 cada perna', 'carga moderada, sem chegar perto da falha'),
-    prev('Flexão nórdica (posterior de coxa)', '2 × 5', 'descida lenta'),
-    prev('Prancha frontal', '3 × 40 s'),
-  ],
-}
-
 export function strengthPlan(goal: Goal, days: 0 | 2 | 3): StrengthPlan | null {
   if (days === 0) return null
   const tips = [
@@ -293,12 +232,11 @@ export function strengthPlan(goal: Goal, days: 0 | 2 | 3): StrengthPlan | null {
         ? 'Três sessões: duas com pernas pesadas (o que melhora a economia de corrida) e uma de superior com mais volume. Cada músculo do tronco é treinado 2 a 3 vezes por semana, com cerca de 10 séries semanais ou mais — a faixa que os estudos associam a mais hipertrofia.'
         : 'Duas sessões de corpo inteiro: pernas com carga alta para a corrida e superior com 8 a 10 repetições para a estética. Com 2 dias o volume de superior fica em cerca de 8 séries semanais por músculo: o ganho estético vem, mas mais devagar do que com 3 dias.',
     principles: [
-      'Pernas: poucas repetições com carga alta e saltos. É o tipo de treino com efeito comprovado na economia de corrida, e quase não aumenta o peso corporal.',
-      'Tronco e braços: 8 a 15 repetições perto da falha, com volume semanal suficiente. É onde está o ganho estético, sem atrapalhar a corrida.',
-      'Panturrilha, posterior, adutores e core: reforço das estruturas que mais sofrem com a corrida.',
+      'Prioridade 1, corrida. Pernas com poucas repetições, carga alta e saltos: é o tipo de treino com efeito comprovado na economia de corrida, e quase não aumenta o peso corporal. Vem sempre primeiro na sessão e nunca é cortado.',
+      'Prioridade 2, estética e composição corporal. Tronco e braços com 8 a 15 repetições perto da falha: constrói músculo onde não pesa na corrida.',
+      'Reforço do corredor. Panturrilha, posterior, adutores e core: as estruturas que mais sofrem com a corrida.',
     ],
     tips,
-    workouts: days === 3 ? [WORKOUT_A, WORKOUT_B, WORKOUT_C] : [WORKOUT_A, WORKOUT_B],
     studies: STUDIES,
   }
 }

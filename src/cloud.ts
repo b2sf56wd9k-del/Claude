@@ -8,13 +8,14 @@ import { useStore, type Data } from './store'
 const CFG_KEY = 'ascensao-cloud'
 const META_KEY = 'ascensao-cloud-meta'
 
-export type Personal = Pick<Data, 'name' | 'startDate' | 'quests' | 'events' | 'health' | 'healthReady' | 'measurements' | 'strava'>
+export type Personal = Pick<Data, 'name' | 'startDate' | 'quests' | 'events' | 'health' | 'healthReady' | 'measurements' | 'strava' | 'sessions' | 'activeSession'>
 export type Finance = Pick<Data, 'people' | 'txs' | 'categories' | 'rules'>
 type Kind = 'personal' | 'finance'
 
 export const personalOf = (d: Data): Personal => ({
   name: d.name, startDate: d.startDate, quests: d.quests, events: d.events,
   health: d.health, healthReady: d.healthReady, measurements: d.measurements, strava: d.strava,
+  sessions: d.sessions, activeSession: d.activeSession,
 })
 export const financeOf = (d: Data): Finance => ({ people: d.people, txs: d.txs, categories: d.categories, rules: d.rules })
 
@@ -34,6 +35,8 @@ export function mergePersonal(local: Personal, remote: Partial<Personal>): Perso
     healthReady: local.healthReady || !!remote.healthReady,
     health: local.healthReady || !remote.health ? local.health : remote.health,
     strava: local.strava ?? remote.strava ?? null,
+    sessions: union(local.sessions, remote.sessions, (s) => s.id).sort((a, b) => a.startedAt - b.startedAt),
+    activeSession: local.activeSession ?? remote.activeSession ?? null,
   }
 }
 
@@ -132,7 +135,7 @@ function schedule(ms = 3000) {
 useStore.subscribe((s, prev) => {
   if (applying || !uid) return
   const changed = (keys: (keyof Data)[]) => keys.some((k) => s[k] !== prev[k])
-  const p = changed(['name', 'startDate', 'quests', 'events', 'health', 'healthReady', 'measurements', 'strava'])
+  const p = changed(['name', 'startDate', 'quests', 'events', 'health', 'healthReady', 'measurements', 'strava', 'sessions', 'activeSession'])
   const f = changed(['people', 'txs', 'categories', 'rules'])
   if (!p && !f) return
   if (p) meta.dirty.personal = true
@@ -262,9 +265,10 @@ const supabaseBackend: Backend = {
  */
 function artifactBackend(db: any, myId: string | null, canWrite: boolean): Backend {
   const written = new Map<string, string>()
+  // listas que crescem com o tempo, cada uma dividida em um documento por mês
   const spec = {
-    personal: { col: () => `data/users/${myId}`, base: 'base', prefix: 'ev-', list: 'events' },
-    finance: { col: () => 'finance', base: 'config', prefix: 'tx-', list: 'txs' },
+    personal: { col: () => `data/users/${myId}`, base: 'base', lists: [['events', 'ev-'], ['sessions', 'se-']] },
+    finance: { col: () => 'finance', base: 'config', lists: [['txs', 'tx-']] },
   } as const
   const put = async (path: string, body: unknown) => {
     const json = JSON.stringify(body)
@@ -279,31 +283,34 @@ function artifactBackend(db: any, myId: string | null, canWrite: boolean): Backe
       const sp = spec[kind]
       const snap = await db.collection(sp.col()).limit(1000).get()
       let base: any = null
-      const items: any[] = []
+      const out: Record<string, any[]> = Object.fromEntries(sp.lists.map(([key]) => [key, []]))
       for (const d of [...snap.docs].sort((a: any, b: any) => (a.id < b.id ? -1 : 1))) {
         const body = JSON.parse(JSON.stringify(d.data() ?? {}))
         written.set(`${sp.col()}/${d.id}`, JSON.stringify(body))
         if (d.id === sp.base) base = body
-        else if (d.id.startsWith(sp.prefix)) items.push(...(body[sp.list] ?? []))
+        for (const [key, prefix] of sp.lists) if (d.id.startsWith(prefix)) out[key].push(...(body[key] ?? []))
       }
       if (!base) return null
       const { stamp, ...rest } = base
-      return { data: { ...rest, [sp.list]: items }, stamp }
+      return { data: { ...rest, ...out }, stamp }
     },
     async save(kind, data, stamp) {
       const sp = spec[kind]
-      const { [sp.list]: list, ...rest } = data as any
-      const months = new Map<string, any[]>()
-      for (const it of list as any[]) {
-        const m = String(it.date).slice(0, 7)
-        months.set(m, [...(months.get(m) ?? []), it])
+      const rest: any = { ...(data as any) }
+      for (const [key, prefix] of sp.lists) {
+        const months = new Map<string, any[]>()
+        for (const it of (rest[key] ?? []) as any[]) {
+          const m = String(it.date).slice(0, 7)
+          months.set(m, [...(months.get(m) ?? []), it])
+        }
+        delete rest[key]
+        // meses que existiam e ficaram vazios também precisam ser regravados
+        for (const path of written.keys()) {
+          const id = path.slice(sp.col().length + 1)
+          if (path.startsWith(sp.col() + '/') && id.startsWith(prefix) && !months.has(id.slice(prefix.length))) months.set(id.slice(prefix.length), [])
+        }
+        for (const [m, arr] of months) await put(`${sp.col()}/${prefix}${m}`, { [key]: arr })
       }
-      // meses que existiam e ficaram vazios também precisam ser regravados
-      for (const path of written.keys()) {
-        const id = path.slice(sp.col().length + 1)
-        if (path.startsWith(sp.col() + '/') && id.startsWith(sp.prefix) && !months.has(id.slice(sp.prefix.length))) months.set(id.slice(sp.prefix.length), [])
-      }
-      for (const [m, arr] of months) await put(`${sp.col()}/${sp.prefix}${m}`, { [sp.list]: arr })
       await put(`${sp.col()}/${sp.base}`, { ...rest, stamp })
     },
   }
@@ -376,7 +383,7 @@ function markFirstAccess() {
   // Primeiro acesso neste aparelho: o que já existe aqui precisa ser preservado e enviado.
   if (meta.seen.personal || meta.seen.finance) return
   const s = useStore.getState()
-  meta.dirty = { personal: s.events.length > 0 || s.measurements.length > 0 || s.healthReady, finance: s.txs.length > 0 }
+  meta.dirty = { personal: s.events.length > 0 || s.measurements.length > 0 || s.healthReady || s.sessions.length > 0, finance: s.txs.length > 0 }
   saveMeta()
 }
 

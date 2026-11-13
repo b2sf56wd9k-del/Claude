@@ -200,8 +200,6 @@ describe('saúde', () => {
   it('plano de musculação segue os dias escolhidos', () => {
     expect(strengthPlan('performance', 0)).toBeNull()
     expect(strengthPlan('performance', 3)!.studies.length).toBeGreaterThan(4)
-    expect(strengthPlan('performance', 2)!.workouts).toHaveLength(2)
-    expect(strengthPlan('hipertrofia', 3)!.workouts).toHaveLength(3)
   })
 })
 
@@ -236,7 +234,7 @@ describe('nuvem', () => {
   const ev = (key: string) => ({ key, date: '2026-11-10', attr: 'mente' as const, xp: 10, label: key })
   const tx = (id: string, categoryId = 'outros') => ({ id, date: '2026-11-10', description: id, amount: -10, source: 'conta' as const, owner: 0, categoryId })
   it('junta dados pessoais sem duplicar', () => {
-    const base: Personal = { name: 'A', startDate: '2026-11-10', quests: Q, events: [ev('a'), ev('b')], health: DEFAULT_PROFILE, healthReady: false, measurements: [], strava: null }
+    const base: Personal = { name: 'A', startDate: '2026-11-10', quests: Q, events: [ev('a'), ev('b')], health: DEFAULT_PROFILE, healthReady: false, measurements: [], strava: null, sessions: [], activeSession: null }
     const m = mergePersonal(base, { startDate: '2026-11-01', events: [ev('b'), ev('c')], measurements: [{ date: '2026-11-02', weightKg: 80 }], healthReady: true, health: { ...DEFAULT_PROFILE, heightCm: 180 } })
     expect(m.events.map((e) => e.key)).toEqual(['a', 'b', 'c'])
     expect(m.startDate).toBe('2026-11-01')
@@ -248,5 +246,52 @@ describe('nuvem', () => {
     const m = mergeFinance(local, { txs: [tx('1'), tx('2')], rules: [{ pattern: 'x', categoryId: 'outros' }, { pattern: 'y', categoryId: 'saude' }] })
     expect(m.txs.map((t) => [t.id, t.categoryId])).toEqual([['1', 'mercado'], ['2', 'outros']])
     expect(m.rules).toHaveLength(2)
+  })
+})
+
+import { WORKOUTS, buildSession, nextWorkout, records, suggest, type Session } from './workout/plan'
+import { EXERCISES } from './workout/exercises'
+
+describe('treino', () => {
+  const sess = (id: string, workout: 'A' | 'B' | 'C', day: number, entries: Session['entries']): Session =>
+    ({ id, workout, date: `2026-11-${String(day).padStart(2, '0')}`, minutes: 60, startedAt: day * 1e6, finishedAt: day * 1e6 + 1, entries })
+  const squat = (kg: number, reps: number[]) => ({ ex: 'agachamento', target: 4, reps: [4, 5] as [number, number], rest: 150, sets: reps.map((r) => ({ kg, reps: r })) })
+
+  it('todo exercício do plano existe na biblioteca', () => {
+    for (const w of Object.values(WORKOUTS)) for (const it of w.items) expect(EXERCISES[it.ex], it.ex).toBeTruthy()
+    for (const e of Object.values(EXERCISES)) for (const a of e.alts ?? []) expect(EXERCISES[a], a).toBeTruthy()
+  })
+  it('cabe no tempo e nunca corta o bloco de corrida', () => {
+    for (const w of Object.values(WORKOUTS)) {
+      const run = w.items.filter((i) => i.prio === 1).map((i) => i.ex)
+      for (const m of [30, 45, 60, 75]) {
+        const b = buildSession(w, m)
+        expect(b.items.map((x) => x.item.ex)).toEqual(expect.arrayContaining(run))
+        if (m >= 45) expect(b.minutes, `${w.id} ${m}`).toBeLessThanOrEqual(m)
+      }
+      // com menos tempo saem primeiro os isolados de estética
+      const short = buildSession(w, 45)
+      const iso = w.items.filter((i) => i.prio === 4).map((i) => i.ex)
+      const base = w.items.filter((i) => i.prio === 2).map((i) => i.ex)
+      if (short.dropped.some((d) => base.includes(d))) expect(short.dropped).toEqual(expect.arrayContaining(iso))
+      expect(buildSession(w, 75).dropped).toEqual([])
+    }
+  })
+  it('rotação dos treinos', () => {
+    expect(nextWorkout([], 3)).toBe('A')
+    expect(nextWorkout([sess('1', 'A', 1, [])], 3)).toBe('B')
+    expect(nextWorkout([sess('1', 'A', 1, []), sess('2', 'B', 3, [])], 2)).toBe('A')
+    expect(nextWorkout([sess('1', 'A', 1, []), sess('2', 'C', 3, [])], 3)).toBe('A')
+  })
+  it('progressão dupla', () => {
+    expect(suggest([], 'agachamento', [4, 5], 4).kg).toBeNull()
+    expect(suggest([sess('1', 'A', 1, [squat(80, [5, 5, 5, 5])])], 'agachamento', [4, 5], 4)).toMatchObject({ kg: 85, reps: 4 })
+    expect(suggest([sess('1', 'A', 1, [squat(80, [5, 5, 4, 4])])], 'agachamento', [4, 5], 4)).toMatchObject({ kg: 80, reps: 5 })
+  })
+  it('recordes', () => {
+    const first = sess('1', 'A', 1, [squat(80, [5, 5])])
+    expect(records([], first)).toEqual([])
+    expect(records([first], sess('2', 'A', 5, [squat(85, [5])]))).toEqual(['agachamento'])
+    expect(records([first], sess('2', 'A', 5, [squat(80, [4])]))).toEqual([])
   })
 })

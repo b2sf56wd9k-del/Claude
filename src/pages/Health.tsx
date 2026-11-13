@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { confirmDialog } from '../dialog'
-import { questCount, toISO } from '../game'
-import { GOALS, PURPOSES, assess, composition, strengthPlan, targets, weekLayout, type Goal, type HealthProfile, type Measurement, type Sex } from '../health'
+import { toISO } from '../game'
+import { GOALS, assess, composition, targets, type Goal, type HealthProfile, type Measurement, type Sex } from '../health'
 import { MEASURE_XP, latestMeasurement, useStore } from '../store'
 
 const num = (s: string) => {
@@ -11,16 +11,13 @@ const num = (s: string) => {
 const fmt = (n: number | null | undefined, unit = '') => (n == null ? '—' : `${String(n).replace('.', ',')}${unit}`)
 
 export default function Health() {
-  const { health, healthReady, measurements, quests, events, saveHealth, addMeasurement, removeMeasurement, advance } = useStore()
+  const { health, healthReady, measurements, saveHealth, addMeasurement, removeMeasurement } = useStore()
   const [editing, setEditing] = useState(!healthReady)
   const today = toISO(new Date())
   const last = latestMeasurement(measurements)
   const comp = last ? composition(health, last) : null
   const tg = last ? targets(health, last, new Date().getFullYear()) : null
   const findings = assess(health, measurements)
-  const plan = strengthPlan(health.goal, health.strengthDays)
-  const forca = quests.find((q) => q.id === 'forca')
-  const done = forca ? questCount(events, forca, today) : 0
 
   return (
     <>
@@ -159,61 +156,12 @@ export default function Health() {
         )}
       </div>
 
-      <h2>Musculação{plan ? ` · ${done}/${health.strengthDays} na semana` : ''}</h2>
-      {!plan ? (
-        <div className="card">
-          <p className="muted">Musculação desativada. Toque em Alterar, no topo, para escolher 2 ou 3 vezes por semana.</p>
-        </div>
-      ) : (
-        <>
-          <div className="card">
-            <p className="small">{plan.summary}</p>
-            <ul className="tips">
-              {plan.principles.map((t) => (
-                <li key={t}>{t}</li>
-              ))}
-            </ul>
-            <p className="notice">Semana sugerida: {weekLayout(health.runDays, health.strengthDays)}</p>
-            <ul className="tips">
-              {plan.tips.map((t) => (
-                <li key={t}>{t}</li>
-              ))}
-            </ul>
-          </div>
-          {plan.workouts.map((w) => (
-            <div className="card workout" key={w.name}>
-              <div className="row" style={{ marginBottom: 8 }}>
-                <div className="grow">
-                  <h3>{w.name}</h3>
-                  <p className="small muted">{w.focus}</p>
-                </div>
-                <button className="btn sm" disabled={done >= health.strengthDays} onClick={() => advance('forca')}>
-                  Treino feito
-                </button>
-              </div>
-              {w.exercises.map((e) => (
-                <div className="ex" key={e.name}>
-                  <span>
-                    {e.name} <span className="tag">{PURPOSES[e.purpose]}</span>
-                    {e.note && <span className="muted small"> — {e.note}</span>}
-                  </span>
-                  <b>{e.sets}</b>
-                </div>
-              ))}
-            </div>
-          ))}
-          <details className="card">
-            <summary>Base científica do plano</summary>
-            {plan.studies.map((st) => (
-              <div className="study" key={st.ref}>
-                <p className="small">{st.finding}</p>
-                <p className="small muted">{st.ref}</p>
-              </div>
-            ))}
-            <p className="notice">O plano aplica as conclusões desses estudos; a escolha exata de exercícios e a divisão dos dias são minhas, não saíram prontas de um estudo.</p>
-          </details>
-        </>
-      )}
+      <h2>Musculação</h2>
+      <div className="card">
+        <p className="muted">
+          {health.strengthDays ? 'Os treinos, as cargas e o histórico ficam na aba Treino.' : 'Musculação desativada. Toque em Alterar, no topo, para escolher 2 ou 3 vezes por semana.'}
+        </p>
+      </div>
     </>
   )
 }

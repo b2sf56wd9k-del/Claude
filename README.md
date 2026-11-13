@@ -14,6 +14,7 @@ npm run build    # gera a pasta dist/ (site estático, instalável no celular co
 ## Como funciona
 
 - **Missões**: cada conclusão gera um evento de XP. Concluir todas as diárias dá bônus e mantém a sequência; falhar gera uma missão de penalidade no dia seguinte, que salva a sequência se cumprida.
+- **Treino**: treino do dia montado pelo tempo disponível (a prioridade é desempenho na corrida, depois estética e composição corporal), esquema animado e instruções de cada exercício, registro de carga e repetições por série com cronômetro de descanso, sugestão de progressão e histórico de cargas.
 - **Saúde**: composição corporal (IMC, % de gordura medido ou estimado por circunferências, massa magra), metas diárias de calorias e macros conforme o objetivo, avaliação da evolução e plano de musculação para 2 ou 3 dias por semana. São estimativas por fórmulas, não prescrição.
 - **Gastos**: importe PDF, OFX ou CSV (conta ou cartão, de qualquer uma das duas pessoas). Os lançamentos são classificados por regras; ao corrigir uma categoria, o app aprende o estabelecimento. Pagamento de fatura e transferências não entram no total, para não contar o cartão em dobro.
 - **Finanças no jogo**: importar o extrato de um mês e fechar o mês dentro do orçamento rendem XP.
@@ -22,7 +23,8 @@ npm run build    # gera a pasta dist/ (site estático, instalável no celular co
 ## Estrutura
 
 - `src/game.ts` — regras do jogo (funções puras)
-- `src/health.ts` — composição corporal, metas de alimentação e planos de força
+- `src/health.ts` — composição corporal, metas de alimentação e princípios do plano de força
+- `src/workout/` — exercícios e seus esquemas, treinos A/B/C, montagem por tempo e progressão
 - `src/finance/parse.ts` — leitura de OFX/CSV
 - `src/finance/pdf.ts` — leitura de extrato e fatura em PDF
 - `src/finance/categorize.ts` — categorias, regras e resumos mensais

@@ -6,6 +6,7 @@ import {
   awardOnce,
   completePenalty,
   toISO,
+  totalXp,
   undoQuest,
   weekStart,
   type Quest,
@@ -26,11 +27,14 @@ import {
 import type { ParsedTx, Source } from './finance/parse'
 import { applyActivities, ensureFresh, exchangeCode, fetchActivities, fetchViaConnector, type StravaState } from './strava'
 import { use } from './platform'
+import { EXERCISES } from './workout/exercises'
+import { WORKOUTS, buildSession, records, type Session, type SetLog, type WorkoutId } from './workout/plan'
 import { DEFAULT_PROFILE, targets, type HealthProfile, type Measurement } from './health'
 
 export const IMPORT_XP = 40
 export const BUDGET_XP = 25
 export const MEASURE_XP = 30
+export const PR_XP = 15
 
 export interface Data {
   name: string
@@ -47,6 +51,10 @@ export interface Data {
   healthReady: boolean
   measurements: Measurement[]
   strava: StravaState | null
+  /** treinos de musculação concluídos */
+  sessions: Session[]
+  /** treino em andamento */
+  activeSession: Session | null
 }
 
 interface Actions {
@@ -60,6 +68,12 @@ interface Actions {
   addMeasurement: (m: Measurement) => void
   removeMeasurement: (date: string) => void
   setStrava: (st: StravaState | null) => void
+  startSession: (workout: WorkoutId, minutes: number) => void
+  logSet: (entry: number, set: SetLog) => void
+  undoSet: (entry: number) => void
+  swapExercise: (entry: number, ex: string) => void
+  cancelSession: () => void
+  finishSession: () => { records: string[]; xp: number } | null
   setTxCategory: (txId: string, categoryId: string) => void
   removeMonth: (month: string, source: Source, owner: number) => void
   setBudget: (categoryId: string, budget: number) => void
@@ -85,6 +99,8 @@ const initial = (): Data => ({
   healthReady: false,
   measurements: [],
   strava: null,
+  sessions: [],
+  activeSession: null,
 })
 
 export const latestMeasurement = (list: Measurement[]) =>
@@ -245,6 +261,63 @@ export const useStore = create<Data & Actions>()(
 
       setStrava: (strava) => set({ strava }),
 
+      startSession: (workout, minutes) => {
+        const built = buildSession(WORKOUTS[workout], minutes)
+        set({
+          activeSession: {
+            id: `s${Date.now()}`,
+            date: today(),
+            workout,
+            minutes,
+            startedAt: Date.now(),
+            entries: built.items.map(({ item, sets }) => ({ ex: item.ex, target: sets, reps: item.reps, rest: item.rest, sets: [] })),
+          },
+        })
+      },
+
+      logSet: (entry, s) =>
+        set((st) => {
+          const a = st.activeSession
+          if (!a) return st
+          return { activeSession: { ...a, entries: a.entries.map((e, i) => (i === entry ? { ...e, sets: [...e.sets, s] } : e)) } }
+        }),
+
+      undoSet: (entry) =>
+        set((st) => {
+          const a = st.activeSession
+          if (!a) return st
+          return { activeSession: { ...a, entries: a.entries.map((e, i) => (i === entry ? { ...e, sets: e.sets.slice(0, -1) } : e)) } }
+        }),
+
+      swapExercise: (entry, ex) =>
+        set((st) => {
+          const a = st.activeSession
+          if (!a) return st
+          return { activeSession: { ...a, entries: a.entries.map((e, i) => (i === entry ? { ...e, ex, sets: [] } : e)) } }
+        }),
+
+      cancelSession: () => set({ activeSession: null }),
+
+      finishSession: () => {
+        const st = get()
+        const a = st.activeSession
+        if (!a || !a.entries.some((e) => e.sets.length > 0)) return null
+        const done: Session = { ...a, finishedAt: Date.now() }
+        const prs = records(st.sessions, done)
+        let events = st.events
+        const before = totalXp(events)
+        // se a missão de força já foi contada hoje (à mão ou pelo Strava), não conta de novo
+        const forca = st.quests.find((q) => q.id === 'forca' && q.active)
+        if (forca && !events.some((e) => e.date === a.date && e.key.startsWith('quest:forca:'))) {
+          events = advanceQuest(events, st.quests, forca, a.date, `Treino ${a.workout} concluído`)
+        }
+        for (const ex of prs.slice(0, 3)) {
+          events = awardOnce(events, { key: `pr:${ex}:${a.date}`, date: a.date, attr: 'forca', xp: PR_XP, label: `Recorde pessoal: ${EXERCISES[ex]?.name ?? ex}` })
+        }
+        set({ sessions: [...st.sessions, done], activeSession: null, events })
+        return { records: prs, xp: totalXp(events) - before }
+      },
+
       setProfile: (p) => set(p),
       replaceAll: (d) => set(d),
       reset: () => set(initial()),
@@ -280,8 +353,8 @@ export const useStore = create<Data & Actions>()(
 )
 
 export function snapshot(): Data {
-  const { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava } = useStore.getState()
-  return { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava }
+  const { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava, sessions, activeSession } = useStore.getState()
+  return { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava, sessions, activeSession }
 }
 
 // ---------- Strava ----------

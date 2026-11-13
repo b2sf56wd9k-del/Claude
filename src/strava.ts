@@ -127,6 +127,9 @@ export function applyActivities(events: XpEvent[], quests: Quest[], seen: number
     known.add(a.id)
     const q = quests.find((x) => x.id === questFor(a) && x.active)
     if (!q) continue
+    const day = a.start_date_local.slice(0, 10)
+    // musculação já registrada no app (ou à mão) nesse dia não conta duas vezes
+    if (q.id === 'forca' && events.some((e) => e.date === day && e.key.startsWith('quest:forca:'))) continue
     const km = a.distance ? ` · ${(a.distance / 1000).toFixed(1).replace('.', ',')} km` : ''
     const next = advanceQuest(events, quests, q, a.start_date_local.slice(0, 10), `Strava: ${a.name}${km}`)
     if (next !== events) added++
