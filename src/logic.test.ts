@@ -281,7 +281,14 @@ describe('treino', () => {
     expect(nextWorkout([], 3)).toBe('A')
     expect(nextWorkout([sess('1', 'A', 1, [])], 3)).toBe('B')
     expect(nextWorkout([sess('1', 'A', 1, []), sess('2', 'B', 3, [])], 2)).toBe('A')
-    expect(nextWorkout([sess('1', 'A', 1, []), sess('2', 'C', 3, [])], 3)).toBe('A')
+    expect(nextWorkout([sess('1', 'A', 1, []), sess('2', 'C', 3, [])], 3)).toBe('B')
+    // dia de pernas leves: treino C; sem C na rotina, segue a alternância
+    expect(nextWorkout([sess('1', 'A', 1, [])], 3, 'leve')).toBe('C')
+    expect(nextWorkout([sess('1', 'A', 1, [])], 2, 'leve')).toBe('B')
+    // B foi o último, mas com pernas reduzidas; A já teve o seu dia cheio: em dia pesado a vez é de B
+    const reduced = { ...sess('2', 'B', 3, []), legs: 'moderado' as const }
+    expect(nextWorkout([sess('1', 'A', 1, []), reduced], 3, 'pesado')).toBe('B')
+    expect(nextWorkout([sess('1', 'A', 1, []), reduced], 3, 'moderado')).toBe('A')
   })
   it('progressão dupla', () => {
     expect(suggest([], 'agachamento', [4, 5], 4).kg).toBeNull()
@@ -336,18 +343,21 @@ describe('temporada', () => {
       { date: '2026-11-21', kind: 'longo', title: '12 km' },
     ]
     const wk = weekFit('2026-11-16', runs, null)
-    expect(wk.map((d) => (d.light ? 'L' : 'P')).join('')).toBe('LPPPLLP')
+    expect(wk.map((d) => d.level[0]).join('')).toBe('lpppmlp')
     expect(wk[0].reason).toMatch(/amanhã tem tiros/)
-    expect(wk[1].note).toMatch(/3 horas/)
     expect(wk[5].reason).toMatch(/hoje tem longão/)
     // pernas pesadas ontem: hoje leve
-    expect(dayFit('2026-11-18', runs, null, ['2026-11-17'])).toMatchObject({ light: true })
+    expect(dayFit('2026-11-18', runs, null, ['2026-11-17']).level).toBe('leve')
     // três dias antes da prova e os dois depois
     const race5 = { name: '5 km', date: '2026-12-06', km: 5 }
-    expect(dayFit('2026-12-03', [], race5).light).toBe(true)
-    expect(dayFit('2026-12-02', [], race5).light).toBe(false)
-    expect(dayFit('2026-12-07', [], race5).light).toBe(true)
-    expect(dayFit('2026-11-18', [], null).light).toBe(false)
+    expect(dayFit('2026-12-03', [], race5).level).toBe('leve')
+    expect(dayFit('2026-12-02', [], race5).level).toBe('pesado')
+    expect(dayFit('2026-12-07', [], race5).level).toBe('leve')
+    expect(dayFit('2026-11-18', [], null).level).toBe('pesado')
+    // voltando de uma pausa na musculação: readaptação, mas a semana da prova manda mais
+    expect(phaseFor('2026-11-16', race5, '2026-11-16', 0).id).toBe('retorno')
+    expect(phaseFor('2026-11-16', race5, '2026-11-16', 2).id).toBe('especifica')
+    expect(phaseFor('2026-12-01', race5, '2026-11-16', 0).id).toBe('prova')
   })
   it('limpa a leitura dos prints e detecta semana de pico', () => {
     expect(sanitizeRuns([{ date: '2026-11-17', kind: 'tiro', title: ' 8x400 ', km: '8' }, { date: '17/11', kind: 'x' }, { date: '2026-11-18', kind: 'voar', km: 999 }, null, { date: '2026-11-20', kind: 'descanso' }])).toEqual([

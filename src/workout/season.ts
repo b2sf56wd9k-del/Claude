@@ -23,6 +23,8 @@ export interface Race {
   name: string
   date: string
   km: number
+  /** tempo-alvo, em segundos */
+  targetSec?: number
 }
 
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(b + 'T12:00:00') - Date.parse(a + 'T12:00:00')) / 86400000)
@@ -46,7 +48,7 @@ export function sanitizeRuns(raw: unknown): PlannedRun[] {
 // ---------- fases ----------
 
 export interface Phase {
-  id: 'livre' | 'base' | 'especifica' | 'polimento' | 'prova' | 'recuperacao' | 'deload'
+  id: 'livre' | 'base' | 'especifica' | 'polimento' | 'prova' | 'recuperacao' | 'deload' | 'retorno'
   name: string
   desc: string
   /** fração das séries de pernas e de superior em relação ao plano cheio */
@@ -63,6 +65,7 @@ const PHASES: Record<Phase['id'], Omit<Phase, 'id'>> = {
   polimento: { name: 'Polimento', desc: 'Reta final para a prova: mantenha as cargas e corte séries de pernas para chegar descansado.', legs: 0.6, upper: 1, hold: true },
   prova: { name: 'Semana da prova', desc: 'Um treino curto e leve no começo da semana, sem chegar perto da falha. Nada de pernas pesadas nos 3 dias antes.', legs: 0.5, upper: 0.6, hold: true },
   recuperacao: { name: 'Recuperação', desc: 'Semana depois da prova: treino leve, só para soltar. As cargas voltam na semana que vem.', legs: 0.5, upper: 0.75, hold: true },
+  retorno: { name: 'Readaptação', desc: 'Pouco ou nenhum treino de força nas últimas três semanas: os dois primeiros treinos são mais curtos e com carga confortável, para não ficar dolorido e atrapalhar a corrida.', legs: 0.6, upper: 0.75, hold: true },
   deload: { name: 'Semana leve', desc: 'A cada quatro semanas o volume cai para o corpo assimilar o treino. Mesmas cargas, menos séries.', legs: 0.65, upper: 0.65, hold: true },
 }
 
@@ -71,7 +74,11 @@ const phase = (id: Phase['id']): Phase => ({ id, ...PHASES[id] })
 /** Até quantos dias antes da prova vai o polimento: provas curtas pedem redução curta. */
 export const taperStart = (km: number) => (km <= 12 ? 10 : km <= 25 ? 20 : 27)
 
-export function phaseFor(today: string, race: Race | null, startDate: string): Phase {
+/**
+ * `recentStrength` é o número de dias com treino de força nas últimas três semanas;
+ * abaixo de 2, o treino entra em readaptação (quando informado).
+ */
+export function phaseFor(today: string, race: Race | null, startDate: string, recentStrength?: number): Phase {
   const to = race ? daysBetween(today, race.date) : null
   const taper = race ? taperStart(race.km) : 0
   if (to !== null) {
@@ -79,6 +86,7 @@ export function phaseFor(today: string, race: Race | null, startDate: string): P
     if (to >= 0 && to <= 6) return phase('prova')
     if (to >= 7 && to <= taper) return phase('polimento')
   }
+  if (recentStrength !== undefined && recentStrength < 2) return phase('retorno')
   const week = Math.floor(daysBetween(weekStart(startDate), weekStart(today)) / 7)
   if (week > 0 && week % 4 === 3) return phase('deload')
   if (to !== null && to > taper) return phase(to <= 62 ? 'especifica' : 'base')
@@ -110,34 +118,35 @@ export function timeline(today: string, race: Race): { id: Phase['id']; name: st
 
 const hard = (r?: PlannedRun) => !!r && RUN_KINDS[r.kind].hard
 
+export type LegLevel = 'pesado' | 'moderado' | 'leve'
+/** fração das séries de pernas em cada nível */
+export const LEG_FACTOR: Record<LegLevel, number> = { pesado: 1, moderado: 0.75, leve: 0.5 }
+
 export interface DayFit {
-  /** hoje as pernas devem ser leves */
-  light: boolean
+  /** quanto as pernas aguentam hoje */
+  level: LegLevel
   reason?: string
-  /** orientação extra para o dia */
-  note?: string
 }
 
 /**
  * O que cabe na musculação de um dia qualquer, para quem treina quando dá.
- * Em vez de proibir o treino, o dia "ruim" vira treino com pernas leves:
- * véspera de treino forte, dia de longão ou prova, perto da prova, ou logo depois de pernas pesadas.
+ * Em vez de proibir o treino, o dia "ruim" vira treino com pernas mais leves:
+ * - leve: véspera de tiros, dia de longão ou prova, perto da prova, ou logo depois de pernas pesadas;
+ * - moderado: véspera de longão ou de treino de ritmo, que toleram melhor pernas um pouco cansadas do que os tiros.
  */
 export function dayFit(date: string, runs: PlannedRun[], race: Race | null, heavyLegDates: string[] = []): DayFit {
   const run = runs.find((r) => r.date === date)
   const next = runs.find((r) => r.date === addDays(date, 1))
   const to = race ? daysBetween(date, race.date) : null
-  const light = (reason: string): DayFit => ({ light: true, reason })
-  if (to === 0) return light('hoje é dia de prova')
-  if (to !== null && to > 0 && to <= 3) return light(`faltam ${to} dia${to === 1 ? '' : 's'} para a prova`)
-  if (to !== null && to < 0 && to >= -2) return light('você acabou de correr a prova')
-  if (run?.kind === 'longo' || run?.kind === 'prova') return light(`hoje tem ${RUN_KINDS[run.kind].name.toLowerCase()}`)
-  if (hard(next)) return light(`amanhã tem ${RUN_KINDS[next!.kind].name.toLowerCase()}`)
-  if (heavyLegDates.includes(addDays(date, -1))) return light('ontem você já treinou pernas pesado')
-  return {
-    light: false,
-    note: run?.kind === 'tiro' || run?.kind === 'ritmo' ? 'Dia de treino forte de corrida: corra primeiro e faça a musculação pelo menos 3 horas depois.' : undefined,
-  }
+  const fit = (level: LegLevel, reason: string): DayFit => ({ level, reason })
+  if (to === 0) return fit('leve', 'hoje é dia de prova')
+  if (to !== null && to > 0 && to <= 3) return fit('leve', `faltam ${to} dia${to === 1 ? '' : 's'} para a prova`)
+  if (to !== null && to < 0 && to >= -2) return fit('leve', 'você acabou de correr a prova')
+  if (run?.kind === 'longo' || run?.kind === 'prova') return fit('leve', `hoje tem ${RUN_KINDS[run.kind].name.toLowerCase()}`)
+  if (next?.kind === 'tiro' || next?.kind === 'prova') return fit('leve', `amanhã tem ${RUN_KINDS[next.kind].name.toLowerCase()}`)
+  if (heavyLegDates.includes(addDays(date, -1))) return fit('leve', 'ontem você já treinou pernas pesado')
+  if (hard(next)) return fit('moderado', `amanhã tem ${RUN_KINDS[next!.kind].name.toLowerCase()}`)
+  return { level: 'pesado' }
 }
 
 export interface DayPlan extends DayFit {

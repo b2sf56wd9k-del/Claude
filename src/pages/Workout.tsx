@@ -3,7 +3,7 @@ import { confirmDialog } from '../dialog'
 import { PURPOSES, strengthPlan, weekLayout } from '../health'
 import { toISO, weekStart } from '../game'
 import { sessionScale, useStore } from '../store'
-import { RUN_KINDS, dayFit, timeline, weekFit, weeksTo, type Race } from '../workout/season'
+import { LEG_FACTOR, RUN_KINDS, dayFit, timeline, weekFit, weeksTo, type Race } from '../workout/season'
 import RunPlan from './RunPlan'
 import Figure from '../workout/Figure'
 import { EXERCISES, EXERCISE_LIST, type ExerciseDef } from '../workout/exercises'
@@ -33,24 +33,23 @@ export default function Workout() {
 // ---------- início ----------
 
 function Home({ go }: { go: (v: View) => void }) {
-  const { health, sessions, startSession, runPlan, race, startDate, setRace } = useStore()
+  const { health, sessions, events, startSession, runPlan, race, startDate, setRace } = useStore()
   const days = health.strengthDays
   const ids = workoutIds(days || 2)
   const today = toISO(new Date())
   const monday = weekStart(today)
   // dias em que as pernas já foram treinadas pesado (treinos A e B)
-  const heavyDates = useMemo(() => sessions.filter((s) => s.finishedAt && s.workout !== 'C').map((s) => s.date), [sessions])
+  const heavyDates = useMemo(() => sessions.filter((s) => s.finishedAt && s.workout !== 'C' && s.legs !== 'leve').map((s) => s.date), [sessions])
   const week = useMemo(() => weekFit(monday, runPlan, race, heavyDates), [monday, runPlan, race, heavyDates])
   const fit = useMemo(() => dayFit(today, runPlan, race, heavyDates), [today, runPlan, race, heavyDates])
-  const base = useMemo(() => sessionScale({ race, startDate, runPlan }), [race, startDate, runPlan])
-  // em dia de pernas leves, o treino C (que já é leve de pernas) passa na frente quando faz parte da rotina
-  const suggested = fit.light && ids.includes('C') ? 'C' : nextWorkout(sessions, days)
+  const base = useMemo(() => sessionScale({ race, startDate, runPlan, sessions, events }), [race, startDate, runPlan, sessions, events])
+  const suggested = nextWorkout(sessions, days, fit.level)
   const [workout, setWorkout] = useState<WorkoutId>(suggested)
-  const [minutes, setMinutes] = useState(() => sessions[sessions.length - 1]?.minutes ?? 60)
+  const [minutes, setMinutes] = useState(() => sessions[sessions.length - 1]?.minutes ?? 45)
   const [editRace, setEditRace] = useState(false)
-  // treino A ou B em dia de pernas leves: metade das séries de pernas, sem subir carga
-  const lightLegs = fit.light && workout !== 'C'
-  const scale = useMemo(() => ({ ...base, legs: base.legs * (lightLegs ? 0.5 : 1) }), [base, lightLegs])
+  // treino A ou B em dia de pernas leves ou moderadas: menos séries de pernas, sem subir carga
+  const lightLegs = fit.level !== 'pesado' && workout !== 'C'
+  const scale = useMemo(() => ({ ...base, legs: base.legs * (lightLegs ? LEG_FACTOR[fit.level] : 1) }), [base, lightLegs, fit.level])
   const hold = base.phase.hold
   const built = useMemo(() => buildSession(WORKOUTS[workout], minutes, scale), [workout, minutes, scale])
   const full = useMemo(() => buildSession(WORKOUTS[workout], 999, scale).minutes, [workout, scale])
@@ -80,13 +79,14 @@ function Home({ go }: { go: (v: View) => void }) {
           {lastDone ? `Último treino: ${lastDone.workout}, em ${dm(lastDone.date)}.` : 'Nenhum treino registrado ainda.'}
         </p>
 
-        {fit.light && (
+        {fit.level !== 'pesado' && (
           <p className="notice warnbox">
-            <b>Hoje, pernas leves:</b> {fit.reason}.{' '}
-            {workout === 'C' ? 'O treino C já é leve de pernas e pesado no superior.' : 'As séries de pernas caem pela metade, com a mesma carga e sem chegar perto da falha. O superior segue normal.'}
+            <b>Hoje, pernas {fit.level === 'leve' ? 'leves' : 'moderadas'}:</b> {fit.reason}.{' '}
+            {workout === 'C'
+              ? 'O treino C já é leve de pernas e pesado no superior.'
+              : `As séries de pernas caem ${fit.level === 'leve' ? 'pela metade' : 'em um quarto'}, com a mesma carga e sem chegar perto da falha. O superior segue normal.`}
           </p>
         )}
-        {!fit.light && fit.note && <p className="notice">{fit.note}</p>}
 
         <p className="small" style={{ margin: '16px 0 8px' }}>
           Quanto tempo você tem hoje?
@@ -104,7 +104,7 @@ function Home({ go }: { go: (v: View) => void }) {
           {built.dropped.length === 0 && built.trimmed && ' Algumas séries foram reduzidas para caber no tempo.'}
           {built.minutes > minutes + 3 && ` Este é o mínimo que mantém o bloco de corrida; o treino completo leva ${full} min.`}
         </p>
-        <button className="btn big" style={{ marginTop: 12 }} onClick={() => startSession(workout, minutes, scale)}>
+        <button className="btn big" style={{ marginTop: 12 }} onClick={() => startSession(workout, minutes, scale, workout === 'C' ? 'leve' : fit.level)}>
           Começar treino {workout}
         </button>
       </div>
@@ -126,13 +126,13 @@ function Home({ go }: { go: (v: View) => void }) {
                 <span className="muted">—</span>
               )}
             </span>
-            <span className={`tag ${d.light ? '' : 'strong'}`}>{d.light ? 'Pernas leves' : 'Pernas pesadas ok'}</span>
+            <span className={`tag ${d.level === 'pesado' ? 'strong' : ''}`}>{d.level === 'pesado' ? 'Pernas pesadas ok' : d.level === 'moderado' ? 'Pernas moderadas' : 'Pernas leves'}</span>
           </div>
         ))}
         <p className="notice">
           {runPlan.length === 0
             ? 'Sem plano de corrida cadastrado, todo dia aparece como livre. Envie os prints do treinador para o app saber quando poupar as pernas.'
-            : 'Treine no dia que der: o app ajusta as pernas ao que vem antes e depois. Véspera de tiro ou longão, e o dia do longão, pedem pernas leves.'}
+            : 'Treine no dia que der: o app ajusta as pernas ao que vem antes e depois. Véspera de tiros e dia de longão pedem pernas leves; véspera de longão, moderadas.'}
         </p>
         <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => go({ v: 'runs' })}>
           Plano de corrida
@@ -204,6 +204,9 @@ function RaceCard(p: { race: Race | null; today: string; phase: { name: string; 
   const [date, setDate] = useState(p.race?.date ?? '')
   const [km, setKm] = useState(p.race ? String(p.race.km).replace('.', ',') : '')
   const kmN = parseFloat(km.replace(',', '.')) || 0
+  const [goal, setGoal] = useState(p.race?.targetSec ? clock(p.race.targetSec) : '')
+  const gm = goal.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/)
+  const goalSec = gm ? +(gm[1] ?? 0) * 3600 + +gm[2] * 60 + +gm[3] : 0
   if (p.editing) {
     return (
       <div className="card">
@@ -220,13 +223,17 @@ function RaceCard(p: { race: Race | null; today: string; phase: { name: string; 
             Distância (km)
             <input type="text" inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)} />
           </label>
+          <label className="field">
+            Tempo-alvo (opcional)
+            <input type="text" inputMode="numeric" placeholder="21:30" value={goal} onChange={(e) => setGoal(e.target.value)} />
+          </label>
         </div>
         <div className="row wrap" style={{ marginTop: 12 }}>
           <button
             className="btn"
-            disabled={!name.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(date) || kmN <= 0}
+            disabled={!name.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(date) || kmN <= 0 || (goal.trim() !== '' && !goalSec)}
             onClick={() => {
-              p.onSave({ name: name.trim(), date, km: kmN })
+              p.onSave({ name: name.trim(), date, km: kmN, ...(goalSec ? { targetSec: goalSec } : {}) })
               p.onEdit(false)
             }}
           >
@@ -263,6 +270,11 @@ function RaceCard(p: { race: Race | null; today: string; phase: { name: string; 
                 {String(p.race.km).replace('.', ',')} km · {dm(p.race.date)}/{p.race.date.slice(0, 4)} ·{' '}
                 {tl.length === 0 ? 'prova concluída' : w <= 0 ? 'é esta semana' : `faltam ${w} semana${w === 1 ? '' : 's'}`}
               </p>
+              {p.race.targetSec ? (
+                <p className="small num" style={{ color: 'var(--gold)' }}>
+                  Meta {clock(p.race.targetSec)} · {clock(p.race.targetSec / p.race.km)}/km
+                </p>
+              ) : null}
             </>
           ) : (
             <p className="muted">Sem prova-alvo. Defina uma para o treino se organizar em fases até ela.</p>
@@ -322,7 +334,8 @@ function Active({ onDone }: { onDone: (r: { session: Session; records: string[];
 
   const entry = session.entries[idx]
   const def = EXERCISES[entry.ex]
-  const hold = useMemo(() => sessionScale(useStore.getState()).phase.hold, [])
+  const phaseHold = useMemo(() => sessionScale(useStore.getState()).phase.hold, [])
+  const hold = phaseHold || ((session.legs ?? 'pesado') !== 'pesado' && LEGS.has(entry.ex))
   const sg = useMemo(() => suggest(sessions, entry.ex, entry.reps, entry.target, hold), [sessions, entry.ex, entry.reps, entry.target, hold])
   const [kg, setKg] = useState('')
   const [reps, setReps] = useState('')

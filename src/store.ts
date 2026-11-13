@@ -29,7 +29,7 @@ import type { ParsedTx, Source } from './finance/parse'
 import { applyActivities, ensureFresh, exchangeCode, fetchActivities, fetchViaConnector, type StravaState } from './strava'
 import { use } from './platform'
 import { EXERCISES } from './workout/exercises'
-import { peakWeek, phaseFor, type PlannedRun, type Race } from './workout/season'
+import { peakWeek, phaseFor, type LegLevel, type PlannedRun, type Race } from './workout/season'
 import { WORKOUTS, buildSession, records, type Session, type SetLog, type WorkoutId } from './workout/plan'
 import { DEFAULT_PROFILE, targets, type HealthProfile, type Measurement } from './health'
 
@@ -74,7 +74,7 @@ interface Actions {
   addMeasurement: (m: Measurement) => void
   removeMeasurement: (date: string) => void
   setStrava: (st: StravaState | null) => void
-  startSession: (workout: WorkoutId, minutes: number, scale: { legs: number; upper: number }) => void
+  startSession: (workout: WorkoutId, minutes: number, scale: { legs: number; upper: number }, legs: LegLevel) => void
   setRace: (race: Race | null) => void
   saveRuns: (runs: PlannedRun[]) => void
   removeRun: (date: string) => void
@@ -115,8 +115,14 @@ const initial = (): Data => ({
 })
 
 /** Redução de séries de hoje: fase da periodização e, em semana de pico de corrida, pernas ainda mais leves. */
-export function sessionScale(d: Pick<Data, 'race' | 'startDate' | 'runPlan'>) {
-  const ph = phaseFor(today(), d.race, d.startDate)
+export function sessionScale(d: Pick<Data, 'race' | 'startDate' | 'runPlan' | 'sessions' | 'events'>) {
+  // dias com treino de força nas últimas três semanas, pelo app ou pelo Strava
+  const floor = addDays(today(), -21)
+  const recent = new Set([
+    ...d.sessions.filter((s) => s.finishedAt && s.date >= floor).map((s) => s.date),
+    ...d.events.filter((e) => e.date >= floor && e.key.startsWith('quest:forca:')).map((e) => e.date),
+  ])
+  const ph = phaseFor(today(), d.race, d.startDate, recent.size)
   const peak = peakWeek(weekStart(today()), d.runPlan)
   return { legs: ph.legs * (peak ? 0.8 : 1), upper: ph.upper, phase: ph, peak }
 }
@@ -279,7 +285,7 @@ export const useStore = create<Data & Actions>()(
 
       setStrava: (strava) => set({ strava }),
 
-      startSession: (workout, minutes, scale) => {
+      startSession: (workout, minutes, scale, legs) => {
         const built = buildSession(WORKOUTS[workout], minutes, scale)
         set({
           activeSession: {
@@ -287,6 +293,7 @@ export const useStore = create<Data & Actions>()(
             date: today(),
             workout,
             minutes,
+            legs,
             startedAt: Date.now(),
             entries: built.items.map(({ item, sets }) => ({ ex: item.ex, target: sets, reps: item.reps, rest: item.rest, sets: [] })),
           },

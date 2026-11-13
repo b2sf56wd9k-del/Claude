@@ -101,15 +101,28 @@ export interface Session {
   minutes: number
   startedAt: number
   finishedAt?: number
+  /** quanto as pernas trabalharam neste treino (sem valor = pesado) */
+  legs?: 'pesado' | 'moderado' | 'leve'
   entries: SessionEntry[]
 }
 
-/** Próximo treino da rotação, a partir do último concluído. */
-export function nextWorkout(sessions: Session[], days: 0 | 2 | 3): WorkoutId {
+/**
+ * Qual treino fazer hoje, para quem treina quando dá.
+ * Dia de pernas leves: o treino C (leve de pernas, pesado no superior), quando faz parte da rotina.
+ * Nos outros dias alterna A e B; em dia de pernas pesadas a vez é de quem está há mais tempo
+ * sem ser feito com as pernas inteiras, para nenhum dos dois ficar sempre com a versão reduzida.
+ */
+export function nextWorkout(sessions: Session[], days: 0 | 2 | 3, level: 'pesado' | 'moderado' | 'leve' = 'pesado'): WorkoutId {
   const ids = workoutIds(days || 2)
-  const last = [...sessions].filter((s) => s.finishedAt).sort((a, b) => a.startedAt - b.startedAt).pop()
-  if (!last) return ids[0]
-  return ids[(ids.indexOf(last.workout) + 1) % ids.length] ?? ids[0]
+  if (level === 'leve' && ids.includes('C')) return 'C'
+  const done = [...sessions].filter((s) => s.finishedAt).sort((a, b) => a.startedAt - b.startedAt)
+  const last = (w: WorkoutId, full: boolean) => {
+    const hit = done.filter((s) => s.workout === w && (!full || (s.legs ?? 'pesado') === 'pesado')).pop()
+    return hit ? hit.startedAt : -1
+  }
+  const key = (w: WorkoutId): [number, number] => (level === 'pesado' ? [last(w, true), last(w, false)] : [last(w, false), 0])
+  const [a, b] = [key('A'), key('B')]
+  return b[0] < a[0] || (b[0] === a[0] && b[1] < a[1]) ? 'B' : 'A'
 }
 
 // ---------- tempo ----------
