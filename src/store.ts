@@ -74,7 +74,7 @@ interface Actions {
   addMeasurement: (m: Measurement) => void
   removeMeasurement: (date: string) => void
   setStrava: (st: StravaState | null) => void
-  startSession: (workout: WorkoutId, minutes: number) => void
+  startSession: (workout: WorkoutId, minutes: number, scale: { legs: number; upper: number }) => void
   setRace: (race: Race | null) => void
   saveRuns: (runs: PlannedRun[]) => void
   removeRun: (date: string) => void
@@ -279,8 +279,8 @@ export const useStore = create<Data & Actions>()(
 
       setStrava: (strava) => set({ strava }),
 
-      startSession: (workout, minutes) => {
-        const built = buildSession(WORKOUTS[workout], minutes, sessionScale(get()))
+      startSession: (workout, minutes, scale) => {
+        const built = buildSession(WORKOUTS[workout], minutes, scale)
         set({
           activeSession: {
             id: `s${Date.now()}`,

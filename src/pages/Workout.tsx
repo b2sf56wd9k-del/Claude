@@ -3,12 +3,12 @@ import { confirmDialog } from '../dialog'
 import { PURPOSES, strengthPlan, weekLayout } from '../health'
 import { toISO, weekStart } from '../game'
 import { sessionScale, useStore } from '../store'
-import { RUN_KINDS, restReason, timeline, weekSchedule, weeksTo, type Race } from '../workout/season'
+import { RUN_KINDS, dayFit, timeline, weekFit, weeksTo, type Race } from '../workout/season'
 import RunPlan from './RunPlan'
 import Figure from '../workout/Figure'
 import { EXERCISES, EXERCISE_LIST, type ExerciseDef } from '../workout/exercises'
 import {
-  WORKOUTS, buildSession, fmtKg, history, lastEntry, nextWorkout, repsLabel, sessionVolume, suggest, workoutIds,
+  LEGS, WORKOUTS, buildSession, fmtKg, history, lastEntry, nextWorkout, repsLabel, sessionVolume, suggest, workoutIds,
   type Session, type SetLog, type WorkoutId,
 } from '../workout/plan'
 
@@ -38,26 +38,30 @@ function Home({ go }: { go: (v: View) => void }) {
   const ids = workoutIds(days || 2)
   const today = toISO(new Date())
   const monday = weekStart(today)
-  const week = useMemo(() => weekSchedule(monday, runPlan, days || 2, race), [monday, runPlan, days, race])
-  const todayPlan = week.find((d) => d.date === today)
-  const scale = useMemo(() => sessionScale({ race, startDate, runPlan }), [race, startDate, runPlan])
-  // o treino encaixado para hoje vale, a menos que já tenha sido feito nesta semana
-  const doneThisWeek = sessions.filter((s) => s.finishedAt && s.date >= monday).map((s) => s.workout)
-  const suggested = todayPlan?.strength && !doneThisWeek.includes(todayPlan.strength) ? todayPlan.strength : nextWorkout(sessions, days)
+  // dias em que as pernas já foram treinadas pesado (treinos A e B)
+  const heavyDates = useMemo(() => sessions.filter((s) => s.finishedAt && s.workout !== 'C').map((s) => s.date), [sessions])
+  const week = useMemo(() => weekFit(monday, runPlan, race, heavyDates), [monday, runPlan, race, heavyDates])
+  const fit = useMemo(() => dayFit(today, runPlan, race, heavyDates), [today, runPlan, race, heavyDates])
+  const base = useMemo(() => sessionScale({ race, startDate, runPlan }), [race, startDate, runPlan])
+  // em dia de pernas leves, o treino C (que já é leve de pernas) passa na frente quando faz parte da rotina
+  const suggested = fit.light && ids.includes('C') ? 'C' : nextWorkout(sessions, days)
   const [workout, setWorkout] = useState<WorkoutId>(suggested)
   const [minutes, setMinutes] = useState(() => sessions[sessions.length - 1]?.minutes ?? 60)
   const [editRace, setEditRace] = useState(false)
+  // treino A ou B em dia de pernas leves: metade das séries de pernas, sem subir carga
+  const lightLegs = fit.light && workout !== 'C'
+  const scale = useMemo(() => ({ ...base, legs: base.legs * (lightLegs ? 0.5 : 1) }), [base, lightLegs])
+  const hold = base.phase.hold
   const built = useMemo(() => buildSession(WORKOUTS[workout], minutes, scale), [workout, minutes, scale])
   const full = useMemo(() => buildSession(WORKOUTS[workout], 999, scale).minutes, [workout, scale])
   const plan = strengthPlan(health.goal, days || 2)!
-  const restDay = !todayPlan?.strength && (runPlan.length > 0 || !!race)
   const lastDone = [...sessions].filter((s) => s.finishedAt).pop()
 
   return (
     <>
       <h1>Treino</h1>
 
-      <RaceCard race={race} today={today} phase={scale.phase} peak={scale.peak} editing={editRace} onEdit={setEditRace} onSave={setRace} />
+      <RaceCard race={race} today={today} phase={base.phase} peak={base.peak} editing={editRace} onEdit={setEditRace} onSave={setRace} />
 
       <div className="chips" style={{ margin: '12px 0' }}>
         {ids.map((id) => (
@@ -76,12 +80,13 @@ function Home({ go }: { go: (v: View) => void }) {
           {lastDone ? `Último treino: ${lastDone.workout}, em ${dm(lastDone.date)}.` : 'Nenhum treino registrado ainda.'}
         </p>
 
-        {restDay && (
+        {fit.light && (
           <p className="notice warnbox">
-            Hoje o plano sugere não fazer musculação: {restReason(week, runPlan, today, race)} Se for treinar mesmo assim, pegue leve nas pernas.
+            <b>Hoje, pernas leves:</b> {fit.reason}.{' '}
+            {workout === 'C' ? 'O treino C já é leve de pernas e pesado no superior.' : 'As séries de pernas caem pela metade, com a mesma carga e sem chegar perto da falha. O superior segue normal.'}
           </p>
         )}
-        {todayPlan?.strength && todayPlan.note && <p className="notice">{todayPlan.note}</p>}
+        {!fit.light && fit.note && <p className="notice">{fit.note}</p>}
 
         <p className="small" style={{ margin: '16px 0 8px' }}>
           Quanto tempo você tem hoje?
@@ -99,7 +104,7 @@ function Home({ go }: { go: (v: View) => void }) {
           {built.dropped.length === 0 && built.trimmed && ' Algumas séries foram reduzidas para caber no tempo.'}
           {built.minutes > minutes + 3 && ` Este é o mínimo que mantém o bloco de corrida; o treino completo leva ${full} min.`}
         </p>
-        <button className="btn big" style={{ marginTop: 12 }} onClick={() => startSession(workout, minutes)}>
+        <button className="btn big" style={{ marginTop: 12 }} onClick={() => startSession(workout, minutes, scale)}>
           Começar treino {workout}
         </button>
       </div>
@@ -121,13 +126,13 @@ function Home({ go }: { go: (v: View) => void }) {
                 <span className="muted">—</span>
               )}
             </span>
-            {d.strength && <span className="tag strong">Treino {d.strength}</span>}
+            <span className={`tag ${d.light ? '' : 'strong'}`}>{d.light ? 'Pernas leves' : 'Pernas pesadas ok'}</span>
           </div>
         ))}
         <p className="notice">
           {runPlan.length === 0
-            ? 'Sem plano de corrida cadastrado: a semana segue o padrão. Envie os prints do treinador para o encaixe ficar sob medida.'
-            : 'Musculação encaixada em volta das corridas: pernas pesadas nunca na véspera de tiro ou longão.'}
+            ? 'Sem plano de corrida cadastrado, todo dia aparece como livre. Envie os prints do treinador para o app saber quando poupar as pernas.'
+            : 'Treine no dia que der: o app ajusta as pernas ao que vem antes e depois. Véspera de tiro ou longão, e o dia do longão, pedem pernas leves.'}
         </p>
         <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => go({ v: 'runs' })}>
           Plano de corrida
@@ -138,7 +143,7 @@ function Home({ go }: { go: (v: View) => void }) {
       <div className="card">
         {built.items.map(({ item, sets }) => {
           const def = EXERCISES[item.ex]
-          const sg = suggest(sessions, item.ex, item.reps, sets, scale.phase.hold)
+          const sg = suggest(sessions, item.ex, item.reps, sets, hold || (lightLegs && LEGS.has(item.ex)))
           return (
             <button className="exrow" key={item.ex} onClick={() => go({ v: 'exercise', id: item.ex, back: { v: 'home' } })}>
               <span className="thumb">

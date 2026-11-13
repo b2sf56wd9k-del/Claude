@@ -296,7 +296,7 @@ describe('treino', () => {
   })
 })
 
-import { peakWeek, phaseFor, sanitizeRuns, weekSchedule, type PlannedRun } from './workout/season'
+import { dayFit, peakWeek, phaseFor, sanitizeRuns, weekFit, type PlannedRun } from './workout/season'
 
 describe('temporada', () => {
   const race = { name: 'Meia', date: '2027-03-14', km: 21.1 }
@@ -321,31 +321,33 @@ describe('temporada', () => {
     const s = { id: '1', workout: 'A' as const, date: '2026-11-01', minutes: 60, startedAt: 1, finishedAt: 2, entries: [{ ex: 'agachamento', target: 4, reps: [4, 5] as [number, number], rest: 150, sets: [5, 5, 5, 5].map((r) => ({ kg: 80, reps: r })) }] }
     expect(suggest([s], 'agachamento', [4, 5], 4, true).kg).toBe(80)
   })
-  it('encaixa a musculação na semana de corrida', () => {
-    // seg 16/11 ... ter tiro, qui leve, dom longão
+  it('polimento proporcional à distância', () => {
+    const r5 = { name: '5 km', date: '2026-12-06', km: 5 }
+    expect(phaseFor('2026-11-16', r5, '2026-11-16').id).toBe('especifica') // 20 dias antes
+    expect(phaseFor('2026-11-27', r5, '2026-11-16').id).toBe('polimento') // 9 dias
+    expect(phaseFor('2026-12-01', r5, '2026-11-16').id).toBe('prova')
+    expect(phaseFor('2026-11-16', { ...r5, km: 21.1 }, '2026-11-16').id).toBe('polimento')
+  })
+  it('o que cabe em cada dia da semana de corrida', () => {
+    // plano real: ter tiros, qui rodagem, sáb longo
     const runs: PlannedRun[] = [
-      { date: '2026-11-17', kind: 'tiro', title: '8x400' },
-      { date: '2026-11-19', kind: 'leve', title: '6 km' },
-      { date: '2026-11-22', kind: 'longo', title: '16 km' },
+      { date: '2026-11-17', kind: 'tiro', title: '6x600' },
+      { date: '2026-11-19', kind: 'leve', title: 'Rodagem 7 km' },
+      { date: '2026-11-21', kind: 'longo', title: '12 km' },
     ]
-    const wk = weekSchedule('2026-11-16', runs, 3, null)
-    const day = (w: string) => wk.findIndex((d) => d.strength === w)
-    expect(day('A')).toBeGreaterThanOrEqual(0)
-    expect(day('B') - day('A')).toBeGreaterThanOrEqual(2)
-    for (const w of ['A', 'B']) {
-      expect(day(w)).not.toBe(0) // véspera do tiro
-      expect(day(w)).not.toBe(5) // véspera do longão
-      expect(day(w)).not.toBe(6) // dia do longão
-    }
-    expect(day('A')).toBe(1) // no mesmo dia do tiro
-    expect(day('C')).not.toBe(6)
+    const wk = weekFit('2026-11-16', runs, null)
+    expect(wk.map((d) => (d.light ? 'L' : 'P')).join('')).toBe('LPPPLLP')
+    expect(wk[0].reason).toMatch(/amanhã tem tiros/)
     expect(wk[1].note).toMatch(/3 horas/)
-    // sem plano: semana padrão
-    expect(weekSchedule('2026-11-16', [], 2, null).map((d) => d.strength ?? '-').join('')).toBe('A---B--')
-    // semana da prova (domingo): um treino só, até quarta
-    const rw = weekSchedule('2027-03-08', [{ date: '2027-03-14', kind: 'prova', title: 'Meia' }], 3, race)
-    expect(rw.filter((d) => d.strength).length).toBe(1)
-    expect(rw.findIndex((d) => d.strength)).toBeLessThanOrEqual(2)
+    expect(wk[5].reason).toMatch(/hoje tem longão/)
+    // pernas pesadas ontem: hoje leve
+    expect(dayFit('2026-11-18', runs, null, ['2026-11-17'])).toMatchObject({ light: true })
+    // três dias antes da prova e os dois depois
+    const race5 = { name: '5 km', date: '2026-12-06', km: 5 }
+    expect(dayFit('2026-12-03', [], race5).light).toBe(true)
+    expect(dayFit('2026-12-02', [], race5).light).toBe(false)
+    expect(dayFit('2026-12-07', [], race5).light).toBe(true)
+    expect(dayFit('2026-11-18', [], null).light).toBe(false)
   })
   it('limpa a leitura dos prints e detecta semana de pico', () => {
     expect(sanitizeRuns([{ date: '2026-11-17', kind: 'tiro', title: ' 8x400 ', km: '8' }, { date: '17/11', kind: 'x' }, { date: '2026-11-18', kind: 'voar', km: 999 }, null, { date: '2026-11-20', kind: 'descanso' }])).toEqual([
