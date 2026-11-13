@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { confirmDialog } from '../dialog'
 import { PURPOSES, strengthPlan, weekLayout } from '../health'
-import { useStore } from '../store'
+import { toISO, weekStart } from '../game'
+import { sessionScale, useStore } from '../store'
+import { RUN_KINDS, restReason, timeline, weekSchedule, weeksTo, type Race } from '../workout/season'
+import RunPlan from './RunPlan'
 import Figure from '../workout/Figure'
 import { EXERCISES, EXERCISE_LIST, type ExerciseDef } from '../workout/exercises'
 import {
@@ -9,7 +12,7 @@ import {
   type Session, type SetLog, type WorkoutId,
 } from '../workout/plan'
 
-type View = { v: 'home' } | { v: 'history' } | { v: 'library' } | { v: 'exercise'; id: string; back: View } | { v: 'summary'; session: Session; records: string[]; xp: number }
+type View = { v: 'home' } | { v: 'history' } | { v: 'library' } | { v: 'runs' } | { v: 'exercise'; id: string; back: View } | { v: 'summary'; session: Session; records: string[]; xp: number }
 
 const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
 const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.max(0, Math.floor(sec % 60))).padStart(2, '0')}`
@@ -22,6 +25,7 @@ export default function Workout() {
   if (view.v === 'summary') return <Summary {...view} onClose={() => setView({ v: 'home' })} />
   if (view.v === 'exercise') return <ExerciseDetail id={view.id} onBack={() => setView(view.back)} />
   if (view.v === 'history') return <HistoryList onBack={() => setView({ v: 'home' })} onOpen={(id) => setView({ v: 'exercise', id, back: view })} />
+  if (view.v === 'runs') return <RunPlan onBack={() => setView({ v: 'home' })} />
   if (view.v === 'library') return <Library onBack={() => setView({ v: 'home' })} onOpen={(id) => setView({ v: 'exercise', id, back: view })} />
   return <Home go={setView} />
 }
@@ -29,22 +33,33 @@ export default function Workout() {
 // ---------- início ----------
 
 function Home({ go }: { go: (v: View) => void }) {
-  const { health, sessions, startSession } = useStore()
+  const { health, sessions, startSession, runPlan, race, startDate, setRace } = useStore()
   const days = health.strengthDays
   const ids = workoutIds(days || 2)
-  const [workout, setWorkout] = useState<WorkoutId>(() => nextWorkout(sessions, days))
+  const today = toISO(new Date())
+  const monday = weekStart(today)
+  const week = useMemo(() => weekSchedule(monday, runPlan, days || 2, race), [monday, runPlan, days, race])
+  const todayPlan = week.find((d) => d.date === today)
+  const scale = useMemo(() => sessionScale({ race, startDate, runPlan }), [race, startDate, runPlan])
+  // o treino encaixado para hoje vale, a menos que já tenha sido feito nesta semana
+  const doneThisWeek = sessions.filter((s) => s.finishedAt && s.date >= monday).map((s) => s.workout)
+  const suggested = todayPlan?.strength && !doneThisWeek.includes(todayPlan.strength) ? todayPlan.strength : nextWorkout(sessions, days)
+  const [workout, setWorkout] = useState<WorkoutId>(suggested)
   const [minutes, setMinutes] = useState(() => sessions[sessions.length - 1]?.minutes ?? 60)
-  const built = useMemo(() => buildSession(WORKOUTS[workout], minutes), [workout, minutes])
-  const full = useMemo(() => buildSession(WORKOUTS[workout], 999).minutes, [workout])
+  const [editRace, setEditRace] = useState(false)
+  const built = useMemo(() => buildSession(WORKOUTS[workout], minutes, scale), [workout, minutes, scale])
+  const full = useMemo(() => buildSession(WORKOUTS[workout], 999, scale).minutes, [workout, scale])
   const plan = strengthPlan(health.goal, days || 2)!
-  const suggested = nextWorkout(sessions, days)
+  const restDay = !todayPlan?.strength && (runPlan.length > 0 || !!race)
   const lastDone = [...sessions].filter((s) => s.finishedAt).pop()
 
   return (
     <>
       <h1>Treino</h1>
 
-      <div className="chips" style={{ marginBottom: 12 }}>
+      <RaceCard race={race} today={today} phase={scale.phase} peak={scale.peak} editing={editRace} onEdit={setEditRace} onSave={setRace} />
+
+      <div className="chips" style={{ margin: '12px 0' }}>
         {ids.map((id) => (
           <button key={id} className={`chip ${workout === id ? 'on' : ''}`} onClick={() => setWorkout(id)}>
             Treino {id}
@@ -60,6 +75,13 @@ function Home({ go }: { go: (v: View) => void }) {
         <p className="small muted" style={{ marginTop: 4 }}>
           {lastDone ? `Último treino: ${lastDone.workout}, em ${dm(lastDone.date)}.` : 'Nenhum treino registrado ainda.'}
         </p>
+
+        {restDay && (
+          <p className="notice warnbox">
+            Hoje o plano sugere não fazer musculação: {restReason(week, runPlan, today, race)} Se for treinar mesmo assim, pegue leve nas pernas.
+          </p>
+        )}
+        {todayPlan?.strength && todayPlan.note && <p className="notice">{todayPlan.note}</p>}
 
         <p className="small" style={{ margin: '16px 0 8px' }}>
           Quanto tempo você tem hoje?
@@ -82,11 +104,41 @@ function Home({ go }: { go: (v: View) => void }) {
         </button>
       </div>
 
+      <h2>Sua semana</h2>
+      <div className="card">
+        {week.map((d, i) => (
+          <div className={`weekrow ${d.date === today ? 'today' : ''}`} key={d.date}>
+            <span className="wd num">
+              {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'][i]} {d.date.slice(8, 10)}
+            </span>
+            <span className="grow small">
+              {d.run ? (
+                <>
+                  {RUN_KINDS[d.run.kind].name}
+                  {d.run.km ? ` · ${String(d.run.km).replace('.', ',')} km` : ''}
+                </>
+              ) : (
+                <span className="muted">—</span>
+              )}
+            </span>
+            {d.strength && <span className="tag strong">Treino {d.strength}</span>}
+          </div>
+        ))}
+        <p className="notice">
+          {runPlan.length === 0
+            ? 'Sem plano de corrida cadastrado: a semana segue o padrão. Envie os prints do treinador para o encaixe ficar sob medida.'
+            : 'Musculação encaixada em volta das corridas: pernas pesadas nunca na véspera de tiro ou longão.'}
+        </p>
+        <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => go({ v: 'runs' })}>
+          Plano de corrida
+        </button>
+      </div>
+
       <h2>Exercícios de hoje</h2>
       <div className="card">
         {built.items.map(({ item, sets }) => {
           const def = EXERCISES[item.ex]
-          const sg = suggest(sessions, item.ex, item.reps, sets)
+          const sg = suggest(sessions, item.ex, item.reps, sets, scale.phase.hold)
           return (
             <button className="exrow" key={item.ex} onClick={() => go({ v: 'exercise', id: item.ex, back: { v: 'home' } })}>
               <span className="thumb">
@@ -142,6 +194,97 @@ function Home({ go }: { go: (v: View) => void }) {
   )
 }
 
+function RaceCard(p: { race: Race | null; today: string; phase: { name: string; desc: string }; peak: boolean; editing: boolean; onEdit: (v: boolean) => void; onSave: (r: Race | null) => void }) {
+  const [name, setName] = useState(p.race?.name ?? '')
+  const [date, setDate] = useState(p.race?.date ?? '')
+  const [km, setKm] = useState(p.race ? String(p.race.km).replace('.', ',') : '')
+  const kmN = parseFloat(km.replace(',', '.')) || 0
+  if (p.editing) {
+    return (
+      <div className="card">
+        <div className="form">
+          <label className="field full">
+            Prova
+            <input type="text" placeholder="Meia maratona de…" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="field">
+            Data
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+          <label className="field">
+            Distância (km)
+            <input type="text" inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)} />
+          </label>
+        </div>
+        <div className="row wrap" style={{ marginTop: 12 }}>
+          <button
+            className="btn"
+            disabled={!name.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(date) || kmN <= 0}
+            onClick={() => {
+              p.onSave({ name: name.trim(), date, km: kmN })
+              p.onEdit(false)
+            }}
+          >
+            Salvar meta
+          </button>
+          <button className="btn ghost" onClick={() => p.onEdit(false)}>
+            Cancelar
+          </button>
+          {p.race && (
+            <button
+              className="btn danger"
+              onClick={() => {
+                p.onSave(null)
+                p.onEdit(false)
+              }}
+            >
+              Remover meta
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+  const tl = p.race ? timeline(p.today, p.race) : []
+  const w = p.race ? weeksTo(p.today, p.race) : 0
+  return (
+    <div className="card">
+      <div className="row">
+        <div className="grow">
+          {p.race ? (
+            <>
+              <p className="exname">{p.race.name}</p>
+              <p className="small muted num">
+                {String(p.race.km).replace('.', ',')} km · {dm(p.race.date)}/{p.race.date.slice(0, 4)} ·{' '}
+                {tl.length === 0 ? 'prova concluída' : w <= 0 ? 'é esta semana' : `faltam ${w} semana${w === 1 ? '' : 's'}`}
+              </p>
+            </>
+          ) : (
+            <p className="muted">Sem prova-alvo. Defina uma para o treino se organizar em fases até ela.</p>
+          )}
+        </div>
+        <button className="btn ghost sm" onClick={() => p.onEdit(true)}>
+          {p.race ? 'Alterar' : 'Definir meta'}
+        </button>
+      </div>
+      {tl.length > 0 && (
+        <div className="phases" role="img" aria-label={`Fases até a prova: ${tl.map((t) => t.name + (t.current ? ' (atual)' : '')).join(', ')}`}>
+          {tl.map((t) => (
+            <div key={t.id} className={t.current ? 'on' : ''} style={{ flexGrow: Math.max(t.share, 0.12) }}>
+              <i />
+              <span>{t.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="small" style={{ marginTop: 12 }}>
+        <b>Fase atual: {p.phase.name}.</b> <span style={{ color: 'var(--text-2)' }}>{p.phase.desc}</span>
+        {p.peak && <span style={{ color: 'var(--text-2)' }}> Esta é uma semana de maior volume de corrida: pernas com menos séries.</span>}
+      </p>
+    </div>
+  )
+}
+
 // ---------- treino em andamento ----------
 
 function Stepper(p: { id: string; label: string; value: string; step: number; onChange: (v: string) => void }) {
@@ -174,7 +317,8 @@ function Active({ onDone }: { onDone: (r: { session: Session; records: string[];
 
   const entry = session.entries[idx]
   const def = EXERCISES[entry.ex]
-  const sg = useMemo(() => suggest(sessions, entry.ex, entry.reps, entry.target), [sessions, entry.ex, entry.reps, entry.target])
+  const hold = useMemo(() => sessionScale(useStore.getState()).phase.hold, [])
+  const sg = useMemo(() => suggest(sessions, entry.ex, entry.reps, entry.target, hold), [sessions, entry.ex, entry.reps, entry.target, hold])
   const [kg, setKg] = useState('')
   const [reps, setReps] = useState('')
 

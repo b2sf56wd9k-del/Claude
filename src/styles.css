@@ -171,20 +171,25 @@ label.field input, label.field select { width: 100%; }
 .overlay { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.6); display: grid; place-items: center; padding: 16px; }
 .modal { width: 100%; max-width: 420px; }
 p.toast { cursor: default; margin: 0 0 12px; }
-/* esquemas dos exercícios */
-.fig { display: block; width: 100%; height: auto; }
-.fig line, .fig circle, .fig rect { vector-effect: non-scaling-stroke; }
-.fig-floor { stroke: var(--line); stroke-width: 1.5; }
-.fig-prop { fill: var(--track); stroke: var(--accent-dim); stroke-width: 1.5; }
-.fig-prop-line { stroke: var(--accent-dim); stroke-width: 5; stroke-linecap: round; }
-.fig-body line.fig-cable { stroke: var(--accent-dim); stroke-width: 1.5; stroke-dasharray: 3 3; }
-.fig-body line { stroke: var(--text); stroke-width: 3.5; stroke-linecap: round; }
-.fig-body line.fig-back { stroke: var(--muted); }
-.fig-body .fig-head { fill: var(--card); stroke: var(--text); stroke-width: 3; }
-.fig-ghost line { stroke: var(--muted); stroke-width: 2.5; stroke-linecap: round; opacity: 0.45; }
-.fig-ghost .fig-head { fill: none; stroke: var(--muted); stroke-width: 2; opacity: 0.45; }
-.fig-load { fill: var(--accent); stroke: var(--bg); stroke-width: 1.5; }
-.fig-load .fig-hub { fill: var(--bg); stroke: none; }
+/* esquemas dos exercícios: tudo em unidades do desenho, para manter as proporções em qualquer tamanho */
+.fig { display: block; width: 100%; height: auto; --fig-bg: var(--bg); }
+.fig line { stroke-linecap: round; }
+.fig-floor { stroke: var(--line); stroke-width: 1; }
+.fig-prop { fill: var(--track); stroke: var(--accent-dim); stroke-width: 1; }
+.fig-prop-line { stroke: var(--track); stroke-width: 6; }
+.fig-body line.fig-cable { stroke: var(--muted); stroke-width: 0.8; stroke-dasharray: 2 2; }
+.fig-gap { stroke: var(--fig-bg); }
+.fig-skin { stroke: #dddcd5; }
+.fig-back { stroke: #7d7c75; }
+.fig-hot { stroke: var(--accent); }
+.fig-torso { stroke-width: 4; stroke-linejoin: round; }
+.fig-torso.fig-skin { fill: #dddcd5; }
+.fig-torso.fig-hot { fill: var(--accent); }
+.fig-head { fill: #dddcd5; stroke: var(--fig-bg); stroke-width: 1.2; }
+.fig-ghost { opacity: 0.22; }
+.fig-ghost .fig-gap { stroke: none; }
+.fig-load { fill: var(--gold); stroke: var(--fig-bg); stroke-width: 1.2; }
+.fig-load .fig-hub { fill: var(--fig-bg); stroke: none; }
 /* treino */
 .btn.big { display: block; width: 100%; padding: 14px 16px; font-size: 16px; }
 .exrow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 0; background: none; border: 0; border-top: 1px solid var(--line); text-align: left; cursor: pointer; }
@@ -216,9 +221,19 @@ p.toast { cursor: default; margin: 0 0 12px; }
 .trend .dot { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
 .trend .lbl { fill: var(--muted); font-size: 11px; }
 .trend .lbl.strong { fill: var(--text); font-weight: 600; }
-.thumb .fig-body line { stroke-width: 2; }
-.thumb .fig-ghost line, .thumb .fig-body .fig-head, .thumb .fig-ghost .fig-head { stroke-width: 1.5; }
-.thumb .fig-floor, .thumb .fig-prop, .thumb .fig-load { stroke-width: 1; }
-.bigfig .fig-body line { stroke-width: 5; }
-.bigfig .fig-body .fig-head { stroke-width: 4; }
-.bigfig .fig-ghost line { stroke-width: 3.5; }
+.weekrow { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.weekrow:first-child { border-top: 0; }
+.weekrow .wd { width: 58px; flex: none; color: var(--text-2); font-size: 14px; }
+.weekrow.today .wd { color: var(--text); font-weight: 700; }
+.weekrow.today { background: linear-gradient(90deg, rgba(144, 133, 233, 0.12), transparent); margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+.tag.strong { color: #14131f; background: var(--accent); border-color: var(--accent); font-weight: 600; white-space: nowrap; }
+.warnbox { border: 1px solid var(--warn); border-radius: 10px; padding: 10px 12px; color: var(--text); }
+.phases { display: flex; gap: 2px; margin-top: 12px; }
+.phases div { flex-basis: 0; min-width: 0; }
+.phases i { display: block; height: 8px; border-radius: 4px; background: var(--track); }
+.phases div.on i { background: var(--gold); }
+.phases span { display: block; font-size: 10px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phases div.on span { color: var(--text); }
+.runrow { padding: 12px 0; border-top: 1px solid var(--line); }
+.runrow:first-child { border-top: 0; padding-top: 0; }
+input[type='date'], input[type='month'] { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; color-scheme: dark; }

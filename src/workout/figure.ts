@@ -33,11 +33,17 @@ export interface FigureDef {
   a: Pose
   /** sem `b` o exercício é isométrico (figura parada) */
   b?: Pose
+  /** partes do corpo que mais trabalham, destacadas no desenho */
+  hot?: ('torso' | 'armU' | 'armL' | 'legU' | 'legL')[]
   props?: Prop[]
 }
 
+export type Seg = 'torso' | 'armU' | 'armL' | 'legU' | 'legL' | 'foot'
+
 export const VIEW = { w: 140, h: 120, floor: 110 }
-const L = { torso: 30, neck: 3, head: 6, armU: 15, armL: 14, legU: 22, legL: 22, foot: 6 }
+const L = { torso: 30, neck: 3, head: 7, armU: 15, armL: 14, legU: 22, legL: 22, foot: 6 }
+/** espessura de cada parte do corpo, nas unidades do desenho */
+export const WIDTH: Record<Seg, number> = { torso: 12, legU: 9, legL: 7, foot: 4.5, armU: 6.5, armL: 5.5 }
 
 type P = [number, number]
 const vec = (deg: number, len: number): P => {
@@ -47,9 +53,18 @@ const vec = (deg: number, len: number): P => {
 const add = (p: P, v: P): P => [p[0] + v[0], p[1] + v[1]]
 const sub = (p: P, v: P): P => [p[0] - v[0], p[1] - v[1]]
 
+export interface Bone {
+  seg: Seg
+  from: P
+  to: P
+  /** membro de trás (mais escuro) */
+  back?: boolean
+}
 export interface Skeleton {
-  /** segmentos em ordem de desenho; `back` são os membros de trás (mais apagados) */
-  bones: { from: P; to: P; back?: boolean }[]
+  /** partes do corpo em ordem de desenho, de trás para a frente */
+  bones: Bone[]
+  /** na vista de frente o tronco é um trapézio (ombros mais largos que o quadril) */
+  torsoPoly?: P[]
   head: P
   joints: Record<Joint, P>
 }
@@ -66,22 +81,22 @@ function side(p: Pose): Skeleton {
   const knee = add(hip, vec(p.legU, L.legU))
   const foot = add(knee, vec(p.legL, L.legL))
   const toe = add(foot, vec(p.toe ?? 90, L.foot))
-  const bones: Skeleton['bones'] = []
+  const bones: Bone[] = []
   let hand2 = hand
   if (p.leg2U !== undefined) {
     const k2 = add(hip, vec(p.leg2U, L.legU))
     const f2 = add(k2, vec(p.leg2L ?? p.leg2U, L.legL))
-    bones.push({ from: hip, to: k2, back: true }, { from: k2, to: f2, back: true })
+    bones.push({ seg: 'legU', from: hip, to: k2, back: true }, { seg: 'legL', from: k2, to: f2, back: true })
   }
   if (p.arm2U !== undefined) {
     const e2 = add(shoulder, vec(p.arm2U, L.armU))
     hand2 = add(e2, vec(p.arm2L ?? p.arm2U, L.armL))
-    bones.push({ from: shoulder, to: e2, back: true }, { from: e2, to: hand2, back: true })
+    bones.push({ seg: 'armU', from: shoulder, to: e2, back: true }, { seg: 'armL', from: e2, to: hand2, back: true })
   }
   bones.push(
-    { from: hip, to: knee }, { from: knee, to: foot }, { from: foot, to: toe },
-    { from: hip, to: shoulder },
-    { from: shoulder, to: elbow }, { from: elbow, to: hand },
+    { seg: 'foot', from: foot, to: toe }, { seg: 'legL', from: knee, to: foot }, { seg: 'legU', from: hip, to: knee },
+    { seg: 'torso', from: hip, to: shoulder },
+    { seg: 'armU', from: shoulder, to: elbow }, { seg: 'armL', from: elbow, to: hand },
   )
   return { bones, head, joints: { hand, hand2, shoulder, hip, knee, foot } }
 }
@@ -89,25 +104,33 @@ function side(p: Pose): Skeleton {
 /** Vista de frente: corpo simétrico, os dois lados espelhados em torno do centro. */
 function front(p: Pose): Skeleton {
   const cx = VIEW.w / 2
-  const footY = p.foot?.[1] ?? VIEW.floor - 2
+  const footY = p.foot?.[1] ?? VIEW.floor - 3
   const legDy = vec(p.legU, L.legU)[1] + vec(p.legL, L.legL)[1]
   const hipY = p.hip?.[1] ?? footY - legDy
   const shY = hipY - L.torso
-  const bones: Skeleton['bones'] = [{ from: [cx, hipY], to: [cx, shY] }, { from: [cx - 9, shY], to: [cx + 9, shY] }, { from: [cx - 5, hipY], to: [cx + 5, hipY] }]
+  const bones: Bone[] = []
   const joints = {} as Record<Joint, P>
   for (const s of [1, -1]) {
     const m = (v: P): P => [v[0] * s, v[1]]
-    const sh: P = [cx + 9 * s, shY]
+    const sh: P = [cx + 11 * s, shY + 2]
     const el = add(sh, m(vec(p.armU, L.armU)))
     const ha = add(el, m(vec(p.armL, L.armL)))
     const hp: P = [cx + 5 * s, hipY]
     const kn = add(hp, m(vec(p.legU, L.legU)))
     const ft = add(kn, m(vec(p.legL, L.legL)))
-    bones.push({ from: sh, to: el }, { from: el, to: ha }, { from: hp, to: kn }, { from: kn, to: ft }, { from: ft, to: [ft[0] + 5 * s, ft[1]] })
+    bones.push(
+      { seg: 'foot', from: ft, to: [ft[0] + 5 * s, ft[1]] }, { seg: 'legL', from: kn, to: ft }, { seg: 'legU', from: hp, to: kn },
+      { seg: 'armU', from: sh, to: el }, { seg: 'armL', from: el, to: ha },
+    )
     if (s === 1) Object.assign(joints, { hand: ha, shoulder: sh, hip: hp, knee: kn, foot: ft })
     else joints.hand2 = ha
   }
-  return { bones, head: [cx, shY - L.neck - L.head], joints }
+  return {
+    bones,
+    torsoPoly: [[cx - 10, shY + 1], [cx + 10, shY + 1], [cx + 6, hipY + 2], [cx - 6, hipY + 2]],
+    head: [cx, shY - L.neck - L.head],
+    joints,
+  }
 }
 
 export function skeleton(def: FigureDef, pose: Pose): Skeleton {

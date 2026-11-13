@@ -75,6 +75,9 @@ export const WORKOUTS: Record<WorkoutId, Workout> = {
   },
 }
 
+/** exercícios de pernas: são os que a periodização e a semana de corrida reduzem */
+export const LEGS = new Set(['pogo', 'agachamento', 'leg-press', 'bulgaro', 'panturrilha-pe', 'salto-caixa', 'terra-romeno', 'elevacao-pelvica', 'panturrilha-sentado', 'step-up', 'nordica', 'copenhagen'])
+
 export const workoutIds = (days: 0 | 2 | 3): WorkoutId[] => (days === 3 ? ['A', 'B', 'C'] : days === 2 ? ['A', 'B'] : [])
 
 // ---------- registro ----------
@@ -139,8 +142,13 @@ export interface Built {
  * primeiro tira séries e depois exercícios de estética isolados, depois os de reforço,
  * depois reduz a base de estética. O bloco de corrida só perde uma série em último caso.
  */
-export function buildSession(workout: Workout, minutes: number): Built {
-  const rows = workout.items.map((item) => ({ item, sets: item.sets }))
+export function buildSession(workout: Workout, minutes: number, scale: { legs: number; upper: number } = { legs: 1, upper: 1 }): Built {
+  // a fase da periodização reduz as séries antes de o tempo entrar na conta
+  const rows = workout.items.map((item) => {
+    const f = LEGS.has(item.ex) ? scale.legs : scale.upper
+    return { item, sets: f >= 1 ? item.sets : Math.max(item.prio === 1 ? 2 : 1, Math.round(item.sets * f)) }
+  })
+  const reduced = scale.legs < 1 || scale.upper < 1
   const total = () => planMinutes(rows.filter((r) => r.sets > 0))
   const byPrio = (p: number) => rows.filter((r) => r.item.prio === p && r.sets > 0).reverse()
   let trimmed = false
@@ -181,8 +189,8 @@ export function buildSession(workout: Workout, minutes: number): Built {
   }
   trim(1, 2)
 
-  // sobrou tempo: uma série a mais na base de estética, até 5
-  for (const r of rows.filter((x) => x.item.prio === 2 && x.sets > 0)) {
+  // sobrou tempo: uma série a mais na base de estética, até 5 (não em fase de volume reduzido)
+  for (const r of reduced ? [] : rows.filter((x) => x.item.prio === 2 && x.sets > 0)) {
     if (r.sets >= 5) continue
     r.sets++
     if (total() > minutes) r.sets--
@@ -222,7 +230,7 @@ export interface Suggestion {
  * Progressão dupla: quando todas as séries chegam ao topo da faixa, sobe a carga;
  * senão, mantém a carga e busca uma repetição a mais.
  */
-export function suggest(sessions: Session[], ex: string, reps: [number, number], target: number): Suggestion {
+export function suggest(sessions: Session[], ex: string, reps: [number, number], target: number, hold = false): Suggestion {
   const def = EXERCISES[ex]
   const last = lastEntry(sessions, ex)
   if (!last) {
@@ -242,6 +250,7 @@ export function suggest(sessions: Session[], ex: string, reps: [number, number],
       ? { kg: 0, reps: reps[1], text: `Bateu o topo da faixa da última vez. Deixe mais difícil: mais lento ou com uma pausa.` }
       : { kg: 0, reps: Math.min(reps[1], worst + (def.unit === 's' ? 5 : 1)), text: `Última vez: mínimo de ${worst} ${unit}. Tente um pouco mais.` }
   }
+  if (hold) return { kg: top, reps: reps[0], text: `Fase de volume reduzido: mantenha ${fmtKg(top)}, sem chegar perto da falha.` }
   if (allTop) return { kg: top + def.step, reps: reps[0], text: `Subiu de carga: todas as séries no topo com ${fmtKg(top)}.` }
   return { kg: top, reps: Math.min(reps[1], worst + 1), text: `Mesma carga da última vez (${fmtKg(top)}); busque 1 repetição a mais.` }
 }

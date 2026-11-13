@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import {
   DEFAULT_QUESTS,
+  addDays,
   advanceQuest,
   awardOnce,
   completePenalty,
@@ -28,6 +29,7 @@ import type { ParsedTx, Source } from './finance/parse'
 import { applyActivities, ensureFresh, exchangeCode, fetchActivities, fetchViaConnector, type StravaState } from './strava'
 import { use } from './platform'
 import { EXERCISES } from './workout/exercises'
+import { peakWeek, phaseFor, type PlannedRun, type Race } from './workout/season'
 import { WORKOUTS, buildSession, records, type Session, type SetLog, type WorkoutId } from './workout/plan'
 import { DEFAULT_PROFILE, targets, type HealthProfile, type Measurement } from './health'
 
@@ -55,6 +57,10 @@ export interface Data {
   sessions: Session[]
   /** treino em andamento */
   activeSession: Session | null
+  /** corridas planejadas pelo treinador */
+  runPlan: PlannedRun[]
+  /** prova-alvo */
+  race: Race | null
 }
 
 interface Actions {
@@ -69,6 +75,9 @@ interface Actions {
   removeMeasurement: (date: string) => void
   setStrava: (st: StravaState | null) => void
   startSession: (workout: WorkoutId, minutes: number) => void
+  setRace: (race: Race | null) => void
+  saveRuns: (runs: PlannedRun[]) => void
+  removeRun: (date: string) => void
   logSet: (entry: number, set: SetLog) => void
   undoSet: (entry: number) => void
   swapExercise: (entry: number, ex: string) => void
@@ -101,7 +110,16 @@ const initial = (): Data => ({
   strava: null,
   sessions: [],
   activeSession: null,
+  runPlan: [],
+  race: null,
 })
+
+/** Redução de séries de hoje: fase da periodização e, em semana de pico de corrida, pernas ainda mais leves. */
+export function sessionScale(d: Pick<Data, 'race' | 'startDate' | 'runPlan'>) {
+  const ph = phaseFor(today(), d.race, d.startDate)
+  const peak = peakWeek(weekStart(today()), d.runPlan)
+  return { legs: ph.legs * (peak ? 0.8 : 1), upper: ph.upper, phase: ph, peak }
+}
 
 export const latestMeasurement = (list: Measurement[]) =>
   list.length ? list.reduce((a, b) => (b.date > a.date ? b : a)) : null
@@ -262,7 +280,7 @@ export const useStore = create<Data & Actions>()(
       setStrava: (strava) => set({ strava }),
 
       startSession: (workout, minutes) => {
-        const built = buildSession(WORKOUTS[workout], minutes)
+        const built = buildSession(WORKOUTS[workout], minutes, sessionScale(get()))
         set({
           activeSession: {
             id: `s${Date.now()}`,
@@ -274,6 +292,18 @@ export const useStore = create<Data & Actions>()(
           },
         })
       },
+
+      setRace: (race) => set({ race }),
+
+      saveRuns: (runs) =>
+        set((st) => {
+          const dates = new Set(runs.map((r) => r.date))
+          // guarda só o que ainda interessa: dos últimos 60 dias em diante
+          const floor = addDays(today(), -60)
+          return { runPlan: [...st.runPlan.filter((r) => !dates.has(r.date)), ...runs].filter((r) => r.date >= floor).sort((a, b) => (a.date < b.date ? -1 : 1)) }
+        }),
+
+      removeRun: (date) => set((st) => ({ runPlan: st.runPlan.filter((r) => r.date !== date) })),
 
       logSet: (entry, s) =>
         set((st) => {
@@ -353,8 +383,8 @@ export const useStore = create<Data & Actions>()(
 )
 
 export function snapshot(): Data {
-  const { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava, sessions, activeSession } = useStore.getState()
-  return { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava, sessions, activeSession }
+  const { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava, sessions, activeSession, runPlan, race } = useStore.getState()
+  return { name, startDate, people, quests, events, txs, categories, rules, health, healthReady, measurements, strava, sessions, activeSession, runPlan, race }
 }
 
 // ---------- Strava ----------

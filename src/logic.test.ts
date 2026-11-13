@@ -234,7 +234,7 @@ describe('nuvem', () => {
   const ev = (key: string) => ({ key, date: '2026-11-10', attr: 'mente' as const, xp: 10, label: key })
   const tx = (id: string, categoryId = 'outros') => ({ id, date: '2026-11-10', description: id, amount: -10, source: 'conta' as const, owner: 0, categoryId })
   it('junta dados pessoais sem duplicar', () => {
-    const base: Personal = { name: 'A', startDate: '2026-11-10', quests: Q, events: [ev('a'), ev('b')], health: DEFAULT_PROFILE, healthReady: false, measurements: [], strava: null, sessions: [], activeSession: null }
+    const base: Personal = { name: 'A', startDate: '2026-11-10', quests: Q, events: [ev('a'), ev('b')], health: DEFAULT_PROFILE, healthReady: false, measurements: [], strava: null, sessions: [], activeSession: null, runPlan: [], race: null }
     const m = mergePersonal(base, { startDate: '2026-11-01', events: [ev('b'), ev('c')], measurements: [{ date: '2026-11-02', weightKg: 80 }], healthReady: true, health: { ...DEFAULT_PROFILE, heightCm: 180 } })
     expect(m.events.map((e) => e.key)).toEqual(['a', 'b', 'c'])
     expect(m.startDate).toBe('2026-11-01')
@@ -293,5 +293,69 @@ describe('treino', () => {
     expect(records([], first)).toEqual([])
     expect(records([first], sess('2', 'A', 5, [squat(85, [5])]))).toEqual(['agachamento'])
     expect(records([first], sess('2', 'A', 5, [squat(80, [4])]))).toEqual([])
+  })
+})
+
+import { peakWeek, phaseFor, sanitizeRuns, weekSchedule, type PlannedRun } from './workout/season'
+
+describe('temporada', () => {
+  const race = { name: 'Meia', date: '2027-03-14', km: 21.1 }
+  it('fases até a prova', () => {
+    expect(phaseFor('2026-11-16', null, '2026-11-16').id).toBe('livre')
+    expect(phaseFor('2026-11-16', race, '2026-11-16').id).toBe('base')
+    expect(phaseFor('2027-02-01', race, '2027-02-01').id).toBe('especifica')
+    expect(phaseFor('2027-02-25', race, '2026-11-16').id).toBe('polimento')
+    expect(phaseFor('2027-03-10', race, '2026-11-16').id).toBe('prova')
+    expect(phaseFor('2027-03-16', race, '2026-11-16').id).toBe('recuperacao')
+    // quarta semana desde o início é leve
+    expect(phaseFor('2026-12-08', null, '2026-11-16').id).toBe('deload')
+    expect(phaseFor('2026-12-15', null, '2026-11-16').id).toBe('livre')
+  })
+  it('a fase reduz séries de pernas e segura a carga', () => {
+    const full = buildSession(WORKOUTS.A, 999)
+    const taper = buildSession(WORKOUTS.A, 999, { legs: 0.6, upper: 1 })
+    const sets = (b: typeof full, ex: string) => b.items.find((x) => x.item.ex === ex)!.sets
+    expect(sets(taper, 'agachamento')).toBeLessThan(sets(full, 'agachamento'))
+    expect(sets(taper, 'agachamento')).toBeGreaterThanOrEqual(2)
+    expect(sets(taper, 'supino')).toBe(4)
+    const s = { id: '1', workout: 'A' as const, date: '2026-11-01', minutes: 60, startedAt: 1, finishedAt: 2, entries: [{ ex: 'agachamento', target: 4, reps: [4, 5] as [number, number], rest: 150, sets: [5, 5, 5, 5].map((r) => ({ kg: 80, reps: r })) }] }
+    expect(suggest([s], 'agachamento', [4, 5], 4, true).kg).toBe(80)
+  })
+  it('encaixa a musculação na semana de corrida', () => {
+    // seg 16/11 ... ter tiro, qui leve, dom longão
+    const runs: PlannedRun[] = [
+      { date: '2026-11-17', kind: 'tiro', title: '8x400' },
+      { date: '2026-11-19', kind: 'leve', title: '6 km' },
+      { date: '2026-11-22', kind: 'longo', title: '16 km' },
+    ]
+    const wk = weekSchedule('2026-11-16', runs, 3, null)
+    const day = (w: string) => wk.findIndex((d) => d.strength === w)
+    expect(day('A')).toBeGreaterThanOrEqual(0)
+    expect(day('B') - day('A')).toBeGreaterThanOrEqual(2)
+    for (const w of ['A', 'B']) {
+      expect(day(w)).not.toBe(0) // véspera do tiro
+      expect(day(w)).not.toBe(5) // véspera do longão
+      expect(day(w)).not.toBe(6) // dia do longão
+    }
+    expect(day('A')).toBe(1) // no mesmo dia do tiro
+    expect(day('C')).not.toBe(6)
+    expect(wk[1].note).toMatch(/3 horas/)
+    // sem plano: semana padrão
+    expect(weekSchedule('2026-11-16', [], 2, null).map((d) => d.strength ?? '-').join('')).toBe('A---B--')
+    // semana da prova (domingo): um treino só, até quarta
+    const rw = weekSchedule('2027-03-08', [{ date: '2027-03-14', kind: 'prova', title: 'Meia' }], 3, race)
+    expect(rw.filter((d) => d.strength).length).toBe(1)
+    expect(rw.findIndex((d) => d.strength)).toBeLessThanOrEqual(2)
+  })
+  it('limpa a leitura dos prints e detecta semana de pico', () => {
+    expect(sanitizeRuns([{ date: '2026-11-17', kind: 'tiro', title: ' 8x400 ', km: '8' }, { date: '17/11', kind: 'x' }, { date: '2026-11-18', kind: 'voar', km: 999 }, null, { date: '2026-11-20', kind: 'descanso' }])).toEqual([
+      { date: '2026-11-17', kind: 'tiro', title: '8x400', km: 8 },
+      { date: '2026-11-18', kind: 'leve', title: '' },
+    ])
+    expect(sanitizeRuns('ignore')).toEqual([])
+    const km = (date: string, k: number): PlannedRun => ({ date, kind: 'leve', title: '', km: k })
+    const runs = [km('2026-11-03', 30), km('2026-11-10', 32), km('2026-11-17', 45), km('2026-11-24', 31)]
+    expect(peakWeek('2026-11-16', runs)).toBe(true)
+    expect(peakWeek('2026-11-09', runs)).toBe(false)
   })
 })

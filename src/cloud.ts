@@ -8,14 +8,14 @@ import { useStore, type Data } from './store'
 const CFG_KEY = 'ascensao-cloud'
 const META_KEY = 'ascensao-cloud-meta'
 
-export type Personal = Pick<Data, 'name' | 'startDate' | 'quests' | 'events' | 'health' | 'healthReady' | 'measurements' | 'strava' | 'sessions' | 'activeSession'>
+export type Personal = Pick<Data, 'name' | 'startDate' | 'quests' | 'events' | 'health' | 'healthReady' | 'measurements' | 'strava' | 'sessions' | 'activeSession' | 'runPlan' | 'race'>
 export type Finance = Pick<Data, 'people' | 'txs' | 'categories' | 'rules'>
 type Kind = 'personal' | 'finance'
 
 export const personalOf = (d: Data): Personal => ({
   name: d.name, startDate: d.startDate, quests: d.quests, events: d.events,
   health: d.health, healthReady: d.healthReady, measurements: d.measurements, strava: d.strava,
-  sessions: d.sessions, activeSession: d.activeSession,
+  sessions: d.sessions, activeSession: d.activeSession, runPlan: d.runPlan, race: d.race,
 })
 export const financeOf = (d: Data): Finance => ({ people: d.people, txs: d.txs, categories: d.categories, rules: d.rules })
 
@@ -37,6 +37,8 @@ export function mergePersonal(local: Personal, remote: Partial<Personal>): Perso
     strava: local.strava ?? remote.strava ?? null,
     sessions: union(local.sessions, remote.sessions, (s) => s.id).sort((a, b) => a.startedAt - b.startedAt),
     activeSession: local.activeSession ?? remote.activeSession ?? null,
+    runPlan: union(local.runPlan, remote.runPlan, (r) => r.date).sort((a, b) => (a.date < b.date ? -1 : 1)),
+    race: local.race ?? remote.race ?? null,
   }
 }
 
@@ -135,7 +137,7 @@ function schedule(ms = 3000) {
 useStore.subscribe((s, prev) => {
   if (applying || !uid) return
   const changed = (keys: (keyof Data)[]) => keys.some((k) => s[k] !== prev[k])
-  const p = changed(['name', 'startDate', 'quests', 'events', 'health', 'healthReady', 'measurements', 'strava', 'sessions', 'activeSession'])
+  const p = changed(['name', 'startDate', 'quests', 'events', 'health', 'healthReady', 'measurements', 'strava', 'sessions', 'activeSession', 'runPlan', 'race'])
   const f = changed(['people', 'txs', 'categories', 'rules'])
   if (!p && !f) return
   if (p) meta.dirty.personal = true
@@ -383,7 +385,7 @@ function markFirstAccess() {
   // Primeiro acesso neste aparelho: o que já existe aqui precisa ser preservado e enviado.
   if (meta.seen.personal || meta.seen.finance) return
   const s = useStore.getState()
-  meta.dirty = { personal: s.events.length > 0 || s.measurements.length > 0 || s.healthReady || s.sessions.length > 0, finance: s.txs.length > 0 }
+  meta.dirty = { personal: s.events.length > 0 || s.measurements.length > 0 || s.healthReady || s.sessions.length > 0 || s.runPlan.length > 0 || !!s.race, finance: s.txs.length > 0 }
   saveMeta()
 }
 
